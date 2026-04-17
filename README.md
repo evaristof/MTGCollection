@@ -1,40 +1,76 @@
 # MTGCollection
 
-Back-end para gestão de uma coleção de Magic: The Gathering, com integração à [Scryfall API](https://scryfall.com/docs/api).
-
-Esta primeira versão possui apenas o **back-end**, já estruturado para futuramente ser consumido por um front-end em **React** (endpoints sob `/api/**` e CORS liberado para `localhost:3000`/`localhost:5173`).
+Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Boot + H2 e front-end React + Vite. Integra com a [Scryfall API](https://scryfall.com/docs/api).
 
 ## Stack
 
+**Back-end**
 - Java 17
-- Spring Boot 3.2 (Web + Data JPA)
+- Spring Boot 3.2 (Web + Data JPA + Validation)
 - Hibernate
 - H2 (banco em memória)
 - GSON (parsing das respostas do Scryfall)
 - JUnit 5 + Mockito + AssertJ
 
+**Front-end**
+- React 19 + Vite + TypeScript
+- React Router DOM
+- CSS minimalista (sem libs de UI — podemos trocar por Mantine/Chakra depois)
+
 ## Como rodar
 
 ```bash
+# backend
 mvn spring-boot:run
+
+# frontend (em outro terminal)
+cd frontend
+npm install
+npm run dev     # http://localhost:5173 (com proxy /api -> http://localhost:8080)
 ```
 
-A aplicação sobe em `http://localhost:8080`. O console H2 fica em `http://localhost:8080/h2-console` (JDBC URL: `jdbc:h2:mem:mtgcollection`).
+A aplicação Java sobe em `http://localhost:8080`. O console H2 fica em `http://localhost:8080/h2-console` (JDBC URL: `jdbc:h2:mem:mtgcollection`).
+
+Em produção do front, defina `VITE_API_BASE_URL` apontando para a URL absoluta do backend.
 
 ## Como testar
 
 ```bash
-mvn test
+mvn test        # back-end
+cd frontend && npm run lint && npm run build
 ```
 
-## Endpoints principais
+## Endpoints
+
+### Sets
 
 | Método | Rota                                                       | Descrição                                                                  |
 |--------|------------------------------------------------------------|----------------------------------------------------------------------------|
 | GET    | `/api/sets`                                                | Lista todas as coleções (direto do Scryfall)                               |
-| POST   | `/api/sets/sync`                                           | Busca as coleções no Scryfall e grava no banco em memória                  |
-| GET    | `/api/prices/by-name?name=...&set=...&foil=true\|false`    | Preço USD da carta pelo nome exato e código da coleção                     |
-| GET    | `/api/prices/by-number?set=...&number=...&foil=true\|false`| Preço USD da carta pelo código da coleção e número do collector            |
+| POST   | `/api/sets/sync`                                           | Busca as coleções no Scryfall e grava no H2                                |
+| GET    | `/api/sets/db`                                             | Lista os sets persistidos no H2                                            |
+| GET    | `/api/sets/db/{code}`                                      | Busca um set pelo código                                                   |
+| POST   | `/api/sets/db`                                             | Cria um set manualmente (409 se o código já existir)                       |
+| PUT    | `/api/sets/db/{code}`                                      | Atualiza um set existente                                                  |
+| DELETE | `/api/sets/db/{code}`                                      | Remove um set                                                              |
+
+### Preços & Busca
+
+| Método | Rota                                                       | Descrição                                                                  |
+|--------|------------------------------------------------------------|----------------------------------------------------------------------------|
+| GET    | `/api/prices/by-name?name=...&set=...&foil=true\|false`    | Preço USD pelo nome exato e código da coleção                              |
+| GET    | `/api/prices/by-number?set=...&number=...&foil=true\|false`| Preço USD pelo código da coleção e número do collector                     |
+| GET    | `/api/cards/by-name?name=...&set=...`                      | Objeto completo da carta no Scryfall (inclui `collector_number`, `type_line`, `prices`...) |
+
+### Coleção
+
+| Método | Rota                                                       | Descrição                                                                  |
+|--------|------------------------------------------------------------|----------------------------------------------------------------------------|
+| POST   | `/api/collection/cards`                                    | Adiciona carta à coleção (corpo: `card_name`, `set_code`, `foil`, `language`, `quantity`) |
+| GET    | `/api/collection/cards[?set=...]`                          | Lista as cartas da coleção (opcional filtro por set)                       |
+| GET    | `/api/collection/cards/{id}`                               | Busca uma carta da coleção pelo id                                         |
+| PUT    | `/api/collection/cards/{id}`                               | Atualiza qty / foil / language (e opcionalmente name / set)                |
+| DELETE | `/api/collection/cards/{id}`                               | Remove a carta da coleção                                                  |
 
 ## Estrutura do banco
 
@@ -51,19 +87,22 @@ Tabela `MAGIC_SET`:
 | BLOCK_CODE    | VARCHAR   | `block_code`               |
 | BLOCK_NAME    | VARCHAR   | `block`                    |
 
-Tabela `COLLECTION_CARD` (cartas da coleção do usuário):
+Tabela `COLLECTION_CARD`:
 
 | Coluna        | Tipo      | Origem                                     |
 |---------------|-----------|--------------------------------------------|
 | ID            | PK        | auto-gerado                                |
 | CARD_NUMBER   | VARCHAR   | `collector_number` do Scryfall             |
-| CARD_NAME     | VARCHAR   | parâmetro (`card_name`) / `name` Scryfall  |
-| SET_CODE      | VARCHAR   | parâmetro (`set_code`) / `set` Scryfall    |
+| CARD_NAME     | VARCHAR   | parâmetro / `name` do Scryfall             |
+| SET_CODE      | VARCHAR   | parâmetro / `set` do Scryfall              |
 | FOIL          | BOOLEAN   | parâmetro                                  |
 | CARD_TYPE     | VARCHAR   | `type_line` do Scryfall                    |
 | LANGUAGE      | VARCHAR   | parâmetro                                  |
 | QUANTITY      | INT       | parâmetro                                  |
 
-## Futuro front-end
+## Front-end
 
-O projeto já está preparado para receber um front React em `frontend/` (ignorado no `.gitignore`). Basta criar o projeto com Vite/Next e apontar para `http://localhost:8080/api`.
+O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um menu superior e duas telas de CRUD para gerenciar a coleção:
+
+- **Sets** — listar, criar, alterar, deletar + botão para sincronizar do Scryfall
+- **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set
