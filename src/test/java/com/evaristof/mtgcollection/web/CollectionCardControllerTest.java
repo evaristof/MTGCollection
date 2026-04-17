@@ -19,10 +19,13 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -113,5 +116,85 @@ class CollectionCardControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)));
         verify(service).listBySet("2x2");
+    }
+
+    @Test
+    void getOne_returnsEntity() throws Exception {
+        when(service.getById(1L)).thenReturn(sampleEntity());
+
+        mockMvc.perform(get("/api/collection/cards/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.card_name", is("Lightning Bolt")));
+    }
+
+    @Test
+    void getOne_returns404WhenMissing() throws Exception {
+        when(service.getById(42L)).thenThrow(new java.util.NoSuchElementException("nope"));
+
+        mockMvc.perform(get("/api/collection/cards/42"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void put_updatesAndReturnsEntity() throws Exception {
+        when(service.update(eq(1L), anyString(), anyString(), anyBoolean(), anyString(), anyInt()))
+                .thenReturn(sampleEntity());
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "card_name", "Lightning Bolt",
+                "set_code", "2x2",
+                "foil", true,
+                "language", "en",
+                "quantity", 4));
+
+        mockMvc.perform(put("/api/collection/cards/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id", is(1)));
+
+        verify(service).update(1L, "Lightning Bolt", "2x2", true, "en", 4);
+    }
+
+    @Test
+    void put_returns404WhenMissing() throws Exception {
+        doThrow(new java.util.NoSuchElementException("nope"))
+                .when(service).update(eq(42L), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), anyBoolean(), anyString(), anyInt());
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "foil", false, "language", "en", "quantity", 1));
+
+        mockMvc.perform(put("/api/collection/cards/42")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void put_returns400OnInvalidBody() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of(
+                "foil", false, "language", "", "quantity", 0));
+
+        mockMvc.perform(put("/api/collection/cards/1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void delete_returns204WhenFound() throws Exception {
+        when(service.delete(1L)).thenReturn(true);
+
+        mockMvc.perform(delete("/api/collection/cards/1"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void delete_returns404WhenMissing() throws Exception {
+        when(service.delete(42L)).thenReturn(false);
+
+        mockMvc.perform(delete("/api/collection/cards/42"))
+                .andExpect(status().isNotFound());
     }
 }
