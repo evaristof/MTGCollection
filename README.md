@@ -51,6 +51,18 @@ Tabela `MAGIC_SET`:
 | BLOCK_CODE    | VARCHAR   | `block_code`               |
 | BLOCK_NAME    | VARCHAR   | `block`                    |
 
-## Futuro front-end
+## Front-end
 
-O projeto já está preparado para receber um front React em `frontend/` (ignorado no `.gitignore`). Basta criar o projeto com Vite/Next e apontar para `http://localhost:8080/api`.
+Scaffolding inicial em **React + Vite + TypeScript** em [`frontend/`](./frontend).
+
+```bash
+cd frontend
+npm install
+npm run dev     # http://localhost:5173 (com proxy /api -> http://localhost:8080)
+npm run build
+npm run lint
+```
+
+- O `vite.config.ts` já tem proxy de `/api` para o backend em `http://localhost:8080`, então no modo dev basta subir os dois processos em paralelo.
+- Em produção, defina a variável `VITE_API_BASE_URL` apontando para a URL absoluta do backend.
+- A tela inicial consome `GET /api/sets` e lista os sets retornados pelo Scryfall.
