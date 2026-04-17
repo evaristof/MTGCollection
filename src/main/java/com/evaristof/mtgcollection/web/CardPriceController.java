@@ -49,7 +49,7 @@ public class CardPriceController {
         Map<String, Object> body = new HashMap<>();
         if (name != null) body.put("name", name);
         body.put("set", set);
-        if (number != null) body.put("collectorNumber", number);
+        if (number != null) body.put("collector_number", number);
         body.put("foil", foil);
         body.put("currency", "USD");
         body.put("price", price);
