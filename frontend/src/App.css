@@ -1,16 +1,97 @@
+:root {
+  --bg: #0f1115;
+  --bg-alt: #181b22;
+  --border: #2a2f3a;
+  --fg: #e7e9ee;
+  --muted: #8a93a4;
+  --accent: #6aa1ff;
+  --danger: #e06767;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body,
+#root {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+}
+
 .app {
-  max-width: 960px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1rem 2rem;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.app__brand h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.app__nav {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.app__nav a {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s;
+}
+
+.app__nav a:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+}
+
+.app__nav a.active {
+  background: rgba(106, 161, 255, 0.15);
+  color: var(--accent);
+}
+
+.app__main {
+  flex: 1;
+  padding: 1.5rem 2rem 3rem;
+}
+
+.page {
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem 1rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
-.app__header h1 {
-  margin: 0 0 0.25rem;
+.page h2 {
+  margin: 0;
+  font-size: 1.4rem;
 }
 
-.app__header p {
-  color: #666;
-  margin: 0 0 2rem;
+.page h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .toolbar {
@@ -18,41 +99,156 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.toolbar__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: var(--fg);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-alt);
+  padding: 0.45rem 0.75rem;
 }
 
 button {
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.error {
-  color: #b00020;
+button:hover:not(:disabled) {
+  border-color: var(--accent);
 }
 
-.muted {
-  color: #888;
-  font-size: 0.875rem;
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+button.danger {
+  border-color: rgba(224, 103, 103, 0.35);
+  color: var(--danger);
+}
+
+button.danger:hover:not(:disabled) {
+  background: rgba(224, 103, 103, 0.1);
+  border-color: var(--danger);
+}
+
+input[type='search'] {
+  min-width: 240px;
+}
+
+.form {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.form--edit {
+  border-color: var(--accent);
+}
+
+.form__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.form__grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.form__grid label > span {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.form__grid label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+.form__actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
 }
 
 th,
 td {
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #eee;
   text-align: left;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
-th {
-  background: #fafafa;
+thead th {
+  background: var(--bg-alt);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
 }
 
 code {
-  background: #f5f5f5;
-  padding: 0 0.25rem;
-  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.error {
+  color: var(--danger);
+  background: rgba(224, 103, 103, 0.08);
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid rgba(224, 103, 103, 0.3);
+}
+
+.actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+label.inline {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.9rem;
+  color: var(--muted);
 }
