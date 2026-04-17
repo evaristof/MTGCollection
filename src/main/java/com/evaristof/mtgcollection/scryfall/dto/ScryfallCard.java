@@ -23,6 +23,21 @@ public class ScryfallCard {
     @SerializedName("collector_number")
     private String collectorNumber;
 
+    @SerializedName("type_line")
+    private String typeLine;
+
+    @SerializedName("lang")
+    private String lang;
+
+    @SerializedName("rarity")
+    private String rarity;
+
+    @SerializedName("mana_cost")
+    private String manaCost;
+
+    @SerializedName("oracle_text")
+    private String oracleText;
+
     @SerializedName("prices")
     private ScryfallPrices prices;
 
@@ -67,6 +82,46 @@ public class ScryfallCard {
 
     public void setCollectorNumber(String collectorNumber) {
         this.collectorNumber = collectorNumber;
+    }
+
+    public String getTypeLine() {
+        return typeLine;
+    }
+
+    public void setTypeLine(String typeLine) {
+        this.typeLine = typeLine;
+    }
+
+    public String getLang() {
+        return lang;
+    }
+
+    public void setLang(String lang) {
+        this.lang = lang;
+    }
+
+    public String getRarity() {
+        return rarity;
+    }
+
+    public void setRarity(String rarity) {
+        this.rarity = rarity;
+    }
+
+    public String getManaCost() {
+        return manaCost;
+    }
+
+    public void setManaCost(String manaCost) {
+        this.manaCost = manaCost;
+    }
+
+    public String getOracleText() {
+        return oracleText;
+    }
+
+    public void setOracleText(String oracleText) {
+        this.oracleText = oracleText;
     }
 
     public ScryfallPrices getPrices() {
