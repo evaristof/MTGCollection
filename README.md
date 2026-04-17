@@ -5,7 +5,7 @@ Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Bo
 ## Stack
 
 **Back-end**
-- Java 17
+- Java 21
 - Spring Boot 3.2 (Web + Data JPA + Validation)
 - Hibernate
 - H2 (banco em memória)
@@ -32,6 +32,51 @@ npm run dev     # http://localhost:5173 (com proxy /api -> http://localhost:8080
 A aplicação Java sobe em `http://localhost:8080`. O console H2 fica em `http://localhost:8080/h2-console` (JDBC URL: `jdbc:h2:mem:mtgcollection`).
 
 Em produção do front, defina `VITE_API_BASE_URL` apontando para a URL absoluta do backend.
+
+## Troubleshooting — `Cannot assign requested address: getsockopt` no Maven
+
+Em algumas máquinas (principalmente Windows) o Maven falha ao baixar dependências com:
+
+```
+FATAL ... Non-resolvable parent POM ...
+Could not transfer artifact ... from/to central (https://repo.maven.apache.org/maven2):
+Cannot assign requested address: getsockopt
+```
+
+É sintoma de IPv6 quebrado na conexão. Resolve forçando o JVM a usar IPv4 via a variável de ambiente `MAVEN_OPTS`.
+
+### Windows
+
+**Via GUI (Variáveis de Ambiente):**
+1. Menu Iniciar → *"Editar as variáveis de ambiente do sistema"*
+2. Botão **"Variáveis de Ambiente…"**
+3. Em *"Variáveis de usuário"* → **Novo…**
+   - **Nome:** `MAVEN_OPTS`
+   - **Valor:** `-Djava.net.preferIPv4Stack=true`
+4. OK em tudo → **feche e reabra** o terminal / a IDE
+5. Confirmar: `echo %MAVEN_OPTS%` deve imprimir `-Djava.net.preferIPv4Stack=true`
+
+**Via PowerShell (equivalente, persistente):**
+```powershell
+setx MAVEN_OPTS "-Djava.net.preferIPv4Stack=true"
+```
+
+> `MAVEN_OPTS` não precisa ir no `PATH` — são variáveis independentes. Se você já tem um `MAVEN_OPTS` (ex.: `-Xmx2g`), concatene: `-Xmx2g -Djava.net.preferIPv4Stack=true`.
+
+### Linux / macOS
+
+```bash
+export MAVEN_OPTS="-Djava.net.preferIPv4Stack=true"
+# adicione a linha acima ao seu ~/.bashrc / ~/.zshrc pra ficar permanente
+```
+
+Depois rode novamente:
+
+```bash
+mvn -U clean install
+```
+
+O `-U` força o Maven a tentar baixar as dependências que falharam antes.
 
 ## Como testar
 
