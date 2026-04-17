@@ -51,7 +51,19 @@ Tabela `MAGIC_SET`:
 | BLOCK_CODE    | VARCHAR   | `block_code`               |
 | BLOCK_NAME    | VARCHAR   | `block`                    |
 
-## Front-end
+Tabela `COLLECTION_CARD` (cartas da coleção do usuário):
+
+| Coluna        | Tipo      | Origem                                     |
+|---------------|-----------|--------------------------------------------|
+| ID            | PK        | auto-gerado                                |
+| CARD_NUMBER   | VARCHAR   | `collector_number` do Scryfall             |
+| CARD_NAME     | VARCHAR   | parâmetro (`card_name`) / `name` Scryfall  |
+| SET_CODE      | VARCHAR   | parâmetro (`set_code`) / `set` Scryfall    |
+| FOIL          | BOOLEAN   | parâmetro                                  |
+| CARD_TYPE     | VARCHAR   | `type_line` do Scryfall                    |
+| LANGUAGE      | VARCHAR   | parâmetro                                  |
+| QUANTITY      | INT       | parâmetro                                  |
+
 
 Scaffolding inicial em **React + Vite + TypeScript** em [`frontend/`](./frontend).
 
