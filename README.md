@@ -5,7 +5,7 @@ Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Bo
 ## Stack
 
 **Back-end**
-- Java 17
+- Java 21
 - Spring Boot 3.2 (Web + Data JPA + Validation)
 - Hibernate
 - H2 (banco em memória)
