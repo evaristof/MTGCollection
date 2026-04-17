@@ -73,4 +73,52 @@ public class CollectionCardService {
     public List<CollectionCard> listBySet(String setCode) {
         return repository.findBySetCode(setCode);
     }
+
+    @Transactional(readOnly = true)
+    public CollectionCard getById(Long id) {
+        return repository.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "CollectionCard not found: id=" + id));
+    }
+
+    /**
+     * Updates mutable attributes of an existing collection entry. Does not
+     * touch scryfall-derived fields ({@code cardNumber}, {@code cardType})
+     * because those are stable for a given (set, number); use
+     * {@link #addCardToCollection} for a fresh lookup.
+     */
+    @Transactional
+    public CollectionCard update(Long id,
+                                 String cardName,
+                                 String setCode,
+                                 boolean foil,
+                                 String language,
+                                 int quantity) {
+        if (language == null || language.isBlank()) {
+            throw new IllegalArgumentException("language must not be blank");
+        }
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("quantity must be > 0");
+        }
+        CollectionCard existing = getById(id);
+        if (cardName != null && !cardName.isBlank()) {
+            existing.setCardName(cardName);
+        }
+        if (setCode != null && !setCode.isBlank()) {
+            existing.setSetCode(setCode);
+        }
+        existing.setFoil(foil);
+        existing.setLanguage(language);
+        existing.setQuantity(quantity);
+        return repository.save(existing);
+    }
+
+    @Transactional
+    public boolean delete(Long id) {
+        if (!repository.existsById(id)) {
+            return false;
+        }
+        repository.deleteById(id);
+        return true;
+    }
 }
