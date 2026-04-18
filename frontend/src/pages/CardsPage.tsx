@@ -204,20 +204,13 @@ export default function CardsPage() {
           </label>
           <label>
             <span>Set*</span>
-            <input
-              required
-              list="set-options"
+            <SetCombo
+              id="add-set"
               value={addForm.set_code}
-              onChange={(e) => setAddForm({ ...addForm, set_code: e.target.value })}
-              placeholder="2x2"
+              onChange={(code) => setAddForm({ ...addForm, set_code: code })}
+              options={setOptions}
+              emptyLabel="— selecione um set —"
             />
-            <datalist id="set-options">
-              {setOptions.map((o) => (
-                <option key={o.code} value={o.code}>
-                  {o.name} — {o.code}
-                </option>
-              ))}
-            </datalist>
           </label>
           <label>
             <span>Linguagem*</span>
@@ -267,10 +260,12 @@ export default function CardsPage() {
             </label>
             <label>
               <span>Set</span>
-              <input
-                list="set-options"
+              <SetCombo
+                id="edit-set"
                 value={editing.set_code}
-                onChange={(e) => setEditing({ ...editing, set_code: e.target.value })}
+                onChange={(code) => setEditing({ ...editing, set_code: code })}
+                options={setOptions}
+                emptyLabel="— selecione um set —"
               />
             </label>
             <label>
