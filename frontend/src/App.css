@@ -169,8 +169,11 @@ body,
 }
 
 .page {
-  max-width: 1200px;
-  margin: 0 auto;
+  /* Let the page use the full available width of the main column so tables
+   * with many columns (Cartas) aren't capped at ~1200px on wide screens. */
+  max-width: none;
+  width: 100%;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -339,6 +342,10 @@ input[type='search'] {
 
 table {
   width: 100%;
+  /* Minimum width so the many-column "Cartas" grid doesn't squish and cut
+   * columns off. The .table-wrapper still scrolls horizontally on narrow
+   * viewports below this width. */
+  min-width: 1280px;
   border-collapse: collapse;
 }
 
