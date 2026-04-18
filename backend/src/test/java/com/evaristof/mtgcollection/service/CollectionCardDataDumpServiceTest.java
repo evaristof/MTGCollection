@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Import;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -103,6 +104,67 @@ class CollectionCardDataDumpServiceTest {
         LocalDateTime third = service.createDump();
 
         assertThat(service.listDumpTimestamps()).containsExactly(third, second, first);
+    }
+
+    @Test
+    void totalValuePerDump_aggregatesPriceTimesQuantityPerSnapshot() {
+        // dump 1: Treachery 400 * 1 + Bolt 1.50 * 1 + Ancient Tomb 127.91 * 1 = 529.41
+        LocalDateTime first = service.createDump();
+
+        // Bump Bolt quantity to 4 and dump again → new total = 400 + 6 + 127.91 = 533.91
+        CollectionCard bolt = cardRepository.findAll().stream()
+                .filter(c -> "Lightning Bolt".equals(c.getCardName()))
+                .findFirst().orElseThrow();
+        bolt.setQuantity(4);
+        cardRepository.save(bolt);
+        LocalDateTime second = service.createDump();
+
+        List<CollectionCardDataDumpRepository.DumpTotal> totals =
+                service.totalValuePerDump(null, null);
+
+        assertThat(totals).hasSize(2);
+        // Query is ordered asc by timestamp.
+        assertThat(totals.get(0).timestamp()).isEqualTo(first);
+        assertThat(totals.get(0).totalValue()).isEqualByComparingTo("529.41");
+        assertThat(totals.get(1).timestamp()).isEqualTo(second);
+        assertThat(totals.get(1).totalValue()).isEqualByComparingTo("533.91");
+    }
+
+    @Test
+    void totalValuePerDump_filtersByRange() {
+        LocalDateTime first = service.createDump();
+        LocalDateTime second = service.createDump();
+        LocalDateTime third = service.createDump();
+
+        List<LocalDateTime> only = service.totalValuePerDump(second, second)
+                .stream().map(CollectionCardDataDumpRepository.DumpTotal::timestamp)
+                .collect(Collectors.toList());
+        assertThat(only).containsExactly(second);
+
+        List<LocalDateTime> middleUp = service.totalValuePerDump(second, null)
+                .stream().map(CollectionCardDataDumpRepository.DumpTotal::timestamp)
+                .collect(Collectors.toList());
+        assertThat(middleUp).containsExactly(second, third);
+
+        List<LocalDateTime> untilMiddle = service.totalValuePerDump(null, second)
+                .stream().map(CollectionCardDataDumpRepository.DumpTotal::timestamp)
+                .collect(Collectors.toList());
+        assertThat(untilMiddle).containsExactly(first, second);
+    }
+
+    @Test
+    void totalValuePerDump_treatsNullPricesAsZero() {
+        CollectionCard tomb = cardRepository.findAll().stream()
+                .filter(c -> "Ancient Tomb".equals(c.getCardName()))
+                .findFirst().orElseThrow();
+        tomb.setPrice(null);
+        cardRepository.save(tomb);
+
+        service.createDump();
+
+        BigDecimal total = service.totalValuePerDump(null, null).get(0).totalValue();
+        // Only Treachery (400) + Bolt (1.50) remain as priced contributors.
+        assertThat(total).isEqualByComparingTo("401.50");
     }
 
     @Test

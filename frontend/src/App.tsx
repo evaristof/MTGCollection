@@ -48,6 +48,10 @@ function App() {
             <span className="sidebar__icon" aria-hidden>♦</span>
             <span className="sidebar__label">Cartas</span>
           </NavLink>
+          <NavLink to="/charts" title="Gráficos">
+            <span className="sidebar__icon" aria-hidden>📈</span>
+            <span className="sidebar__label">Gráficos</span>
+          </NavLink>
         </nav>
       </aside>
 

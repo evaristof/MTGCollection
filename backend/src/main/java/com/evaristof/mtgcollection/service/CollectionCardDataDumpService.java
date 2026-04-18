@@ -82,4 +82,19 @@ public class CollectionCardDataDumpService {
         long removed = dumpRepository.deleteByDataDumpDateTime(timestamp);
         return removed > 0;
     }
+
+    /**
+     * Per-dump total collection value (sum of {@code price * quantity})
+     * for every snapshot captured in the inclusive range
+     * {@code [from, to]}. When either bound is {@code null} we substitute
+     * an effectively-unbounded value so the caller can say "everything
+     * since the beginning" or "everything until now".
+     */
+    @Transactional(readOnly = true)
+    public List<CollectionCardDataDumpRepository.DumpTotal> totalValuePerDump(
+            LocalDateTime from, LocalDateTime to) {
+        LocalDateTime effectiveFrom = from != null ? from : LocalDateTime.of(1, 1, 1, 0, 0);
+        LocalDateTime effectiveTo = to != null ? to : LocalDateTime.of(9999, 12, 31, 23, 59, 59);
+        return dumpRepository.sumTotalValueByDumpBetween(effectiveFrom, effectiveTo);
+    }
 }
