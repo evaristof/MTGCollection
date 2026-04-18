@@ -21,8 +21,8 @@ const EMPTY_ADD: AddFormState = {
   card_name: '',
   set_code: '',
   foil: false,
-  language: 'en',
-  quantity: 1,
+  language: '',
+  quantity: 0,
 }
 
 /**
@@ -55,7 +55,6 @@ export default function CardsPage() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [filterSet, setFilterSet] = useState<string>('')
   const [addForm, setAddForm] = useState<AddFormState>(EMPTY_ADD)
   const [editing, setEditing] = useState<EditFormState | null>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -65,14 +64,15 @@ export default function CardsPage() {
     setLoading(true)
     setError(null)
     try {
-      const data = await api.listCards(filterSet || undefined)
+      // We now filter client-side (by every form field), so always fetch all.
+      const data = await api.listCards()
       setCards(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [filterSet])
+  }, [])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -111,6 +111,32 @@ export default function CardsPage() {
     [setNameByCode],
   )
 
+  // The "Adicionar carta" form fields double as live filters for the grid:
+  // typing in Nome / Linguagem, picking a Set, changing Quantidade, or
+  // toggling Foil narrows the visible rows. Empty string / zero / false are
+  // treated as "no filter for this field".
+  const filteredCards = useMemo(() => {
+    const nameQ = addForm.card_name.trim().toLowerCase()
+    const langQ = addForm.language.trim().toLowerCase()
+    const setQ = addForm.set_code.trim()
+    const qty = addForm.quantity
+    const foilOnly = addForm.foil
+    if (!nameQ && !langQ && !setQ && (!qty || qty <= 0) && !foilOnly) {
+      return cards
+    }
+    return cards.filter((c) => {
+      if (nameQ && !c.card_name.toLowerCase().includes(nameQ)) return false
+      if (langQ && !c.language.toLowerCase().includes(langQ)) return false
+      if (setQ && c.set_code !== setQ) return false
+      if (qty && qty > 0 && c.quantity !== qty) return false
+      if (foilOnly && !c.foil) return false
+      return true
+    })
+  }, [cards, addForm])
+
+  // Reset to first page whenever any of the filters change.
+  const filterKey = `${addForm.card_name}|${addForm.set_code}|${addForm.language}|${addForm.quantity}|${addForm.foil ? '1' : '0'}`
+
   const {
     pageRows,
     totalCount,
@@ -123,9 +149,9 @@ export default function CardsPage() {
     sortDirection,
     toggleSort,
   } = useTableControls<CollectionCard>({
-    rows: cards,
+    rows: filteredCards,
     initialSortKey: 'card_name',
-    resetKey: filterSet,
+    resetKey: filterKey,
     comparators: {
       // Sort the "Set" column by the resolved set name (fallback to code).
       set_code: (a, b) =>
@@ -242,16 +268,6 @@ export default function CardsPage() {
       <div className="toolbar">
         <h2>Cartas da coleção {loading && <span className="muted">(carregando…)</span>}</h2>
         <div className="toolbar__actions">
-          <label className="inline" htmlFor="filter-set">
-            Filtrar por set:&nbsp;
-          </label>
-          <SetCombo
-            id="filter-set"
-            value={filterSet}
-            onChange={setFilterSet}
-            options={setOptions}
-            emptyLabel="— todos —"
-          />
           <button onClick={() => void loadCards()} disabled={loading}>
             Recarregar
           </button>
@@ -270,10 +286,12 @@ export default function CardsPage() {
       {error && <p className="error">{error}</p>}
 
       <form className="form" onSubmit={onAdd}>
-        <h3>Adicionar carta</h3>
+        <h3>Adicionar / filtrar cartas</h3>
         <p className="muted">
-          O backend consulta o Scryfall automaticamente para preencher <code>collector_number</code>{' '}
-          e <code>type_line</code>.
+          Os campos abaixo também filtram o grid conforme você digita. Clique em{' '}
+          <strong>Adicionar carta</strong> para criar uma entrada com esses valores — o backend
+          consulta o Scryfall automaticamente para preencher <code>collector_number</code> e{' '}
+          <code>type_line</code>.
         </p>
         <div className="form__grid">
           <label>
