@@ -24,7 +24,7 @@ class ScryfallHttpClientTest {
         when(ok.body()).thenReturn("hello");
         when(underlying.send(any(HttpRequest.class), any())).thenAnswer(inv -> ok);
 
-        ScryfallHttpClient client = new ScryfallHttpClient("https://api.scryfall.com", underlying);
+        ScryfallHttpClient client = new ScryfallHttpClient("https://api.scryfall.com", 0, 0L, underlying);
         String body = client.get("/sets");
 
         assertThat(body).isEqualTo("hello");
@@ -40,7 +40,7 @@ class ScryfallHttpClientTest {
         when(err.body()).thenReturn("broken");
         when(underlying.send(any(HttpRequest.class), any())).thenAnswer(inv -> err);
 
-        ScryfallHttpClient client = new ScryfallHttpClient("https://api.scryfall.com", underlying);
+        ScryfallHttpClient client = new ScryfallHttpClient("https://api.scryfall.com", 0, 0L, underlying);
 
         assertThatThrownBy(() -> client.get("/sets"))
                 .isInstanceOf(IOException.class)
