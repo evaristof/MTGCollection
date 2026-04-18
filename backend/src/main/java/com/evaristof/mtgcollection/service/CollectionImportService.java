@@ -490,7 +490,14 @@ public class CollectionImportService {
 
     private void writeCellString(Row row, int columnIndex, String value) {
         Cell cell = row.getCell(columnIndex);
-        if (cell == null) cell = row.createCell(columnIndex, CellType.STRING);
+        if (cell == null) {
+            cell = row.createCell(columnIndex, CellType.STRING);
+        } else if (cell.getCellType() == CellType.FORMULA) {
+            // Clear any existing formula — otherwise Excel recomputes on open
+            // and overwrites our value. setCellValue alone only updates the
+            // cached result, not the formula itself.
+            cell.setBlank();
+        }
         if (value == null) {
             cell.setBlank();
         } else {
@@ -500,7 +507,11 @@ public class CollectionImportService {
 
     private void writeCellNumeric(Row row, int columnIndex, BigDecimal value) {
         Cell cell = row.getCell(columnIndex);
-        if (cell == null) cell = row.createCell(columnIndex, CellType.NUMERIC);
+        if (cell == null) {
+            cell = row.createCell(columnIndex, CellType.NUMERIC);
+        } else if (cell.getCellType() == CellType.FORMULA) {
+            cell.setBlank();
+        }
         if (value == null) {
             cell.setBlank();
         } else {
