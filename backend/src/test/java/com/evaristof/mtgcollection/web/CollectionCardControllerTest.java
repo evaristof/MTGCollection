@@ -15,6 +15,7 @@ import java.util.Map;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -137,15 +138,21 @@ class CollectionCardControllerTest {
 
     @Test
     void put_updatesAndReturnsEntity() throws Exception {
-        when(service.update(eq(1L), anyString(), anyString(), anyBoolean(), anyString(), anyInt()))
+        when(service.update(eq(1L), anyString(), anyString(), anyBoolean(), anyString(), anyInt(),
+                any(), any(), any(), any()))
                 .thenReturn(sampleEntity());
 
-        String body = objectMapper.writeValueAsString(Map.of(
-                "card_name", "Lightning Bolt",
-                "set_code", "2x2",
-                "foil", true,
-                "language", "en",
-                "quantity", 4));
+        String body = objectMapper.writeValueAsString(new java.util.LinkedHashMap<String, Object>() {{
+            put("card_name", "Lightning Bolt");
+            put("set_code", "2x2");
+            put("foil", true);
+            put("language", "en");
+            put("quantity", 4);
+            put("card_type", "Instant");
+            put("price", "1.23");
+            put("comentario", "mint");
+            put("localizacao", "Box A");
+        }});
 
         mockMvc.perform(put("/api/collection/cards/1")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -153,14 +160,15 @@ class CollectionCardControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is(1)));
 
-        verify(service).update(1L, "Lightning Bolt", "2x2", true, "en", 4);
+        verify(service).update(1L, "Lightning Bolt", "2x2", true, "en", 4,
+                "Instant", new java.math.BigDecimal("1.23"), "mint", "Box A");
     }
 
     @Test
     void put_returns404WhenMissing() throws Exception {
         doThrow(new java.util.NoSuchElementException("nope"))
-                .when(service).update(eq(42L), org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(), anyBoolean(), anyString(), anyInt());
+                .when(service).update(eq(42L), any(), any(), anyBoolean(), anyString(), anyInt(),
+                        any(), any(), any(), any());
 
         String body = objectMapper.writeValueAsString(Map.of(
                 "foil", false, "language", "en", "quantity", 1));

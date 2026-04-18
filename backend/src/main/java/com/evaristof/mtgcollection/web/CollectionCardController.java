@@ -7,6 +7,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+
+import java.math.BigDecimal;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -57,7 +59,8 @@ public class CollectionCardController {
                                                  @Valid @RequestBody UpdateCardRequest req) {
         try {
             CollectionCard saved = service.update(
-                    id, req.cardName(), req.setCode(), req.foil(), req.language(), req.quantity());
+                    id, req.cardName(), req.setCode(), req.foil(), req.language(), req.quantity(),
+                    req.cardType(), req.price(), req.comentario(), req.localizacao());
             return ResponseEntity.ok(saved);
         } catch (java.util.NoSuchElementException e) {
             return ResponseEntity.notFound().build();
@@ -124,6 +127,10 @@ public class CollectionCardController {
             @JsonProperty("set_code") String setCode,
             boolean foil,
             @NotBlank String language,
-            @Min(1) int quantity) {
+            @Min(1) int quantity,
+            @JsonProperty("card_type") String cardType,
+            BigDecimal price,
+            String comentario,
+            String localizacao) {
     }
 }

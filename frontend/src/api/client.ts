@@ -83,6 +83,20 @@ export interface UpdateCardInput {
   foil: boolean
   language: string
   quantity: number
+  /**
+   * Campos adicionais editáveis na tela Cartas.
+   *
+   * - `undefined` / ausente → backend mantém o valor atual (não troca).
+   * - `""` → limpa o campo (backend persiste `null`).
+   * - Qualquer outro valor → grava.
+   *
+   * Para `price`, `null` também significa "não alterar" porque o backend
+   * diferencia `null` (não setado) de números via `BigDecimal`.
+   */
+  card_type?: string
+  price?: number | null
+  comentario?: string
+  localizacao?: string
 }
 
 export const api = {
