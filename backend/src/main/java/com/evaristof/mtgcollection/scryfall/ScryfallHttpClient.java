@@ -56,7 +56,28 @@ public class ScryfallHttpClient {
                 .timeout(Duration.ofSeconds(20))
                 .GET()
                 .build();
+        return send(request, url);
+    }
 
+    /**
+     * POSTs a JSON body to the Scryfall API and returns the response body.
+     * Used for endpoints like {@code POST /cards/collection} that take a JSON
+     * payload and return a list of cards.
+     */
+    public String postJson(String path, String jsonBody) throws IOException, InterruptedException {
+        String url = path.startsWith("http") ? path : baseUrl + path;
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Accept", "application/json")
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "MTGCollection/0.1 (+https://github.com/evaristof/MTGCollection)")
+                .timeout(Duration.ofSeconds(30))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+        return send(request, url);
+    }
+
+    private String send(HttpRequest request, String url) throws IOException, InterruptedException {
         IOException lastError = null;
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             HttpResponse<String> response;
