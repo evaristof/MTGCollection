@@ -5,6 +5,7 @@ import com.evaristof.mtgcollection.domain.MagicSet;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.repository.MagicSetRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
+import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardIdentifier;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallPrices;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
@@ -28,7 +29,8 @@ import java.util.Map;
 
 /**
  * Parses an uploaded Magic collection spreadsheet, enriches every row with
- * the card's current price and type (via Scryfall), persists each row as a
+ * the card's current price and type (via Scryfall's batch endpoint
+ * {@code POST /cards/collection}), persists each row as a
  * {@link CollectionCard}, and produces an enriched copy of the workbook.
  *
  * <p>The expected sheet layout follows the user's legacy template:</p>
@@ -51,6 +53,13 @@ import java.util.Map;
  * untouched in the output workbook. Rows flagged with
  * {@code *Conferir sempre Manualmente} in column I skip the Scryfall lookup
  * but are still persisted.</p>
+ *
+ * <p><b>Batch lookup:</b> rather than issuing one HTTP request per row
+ * (which quickly trips Scryfall's 10 req/s limit for larger collections),
+ * we accumulate every row's identifier during parsing, then dispatch them
+ * to {@link CardBatchLookupService} in groups of up to 75. Responses are
+ * matched back to the originating row by {@code (set, collector_number)}
+ * or {@code (set, card_name)}.</p>
  */
 @Service
 public class CollectionImportService {
@@ -77,18 +86,18 @@ public class CollectionImportService {
     private static final int COL_LANG = 9;     // J
     private static final int COL_LOC = 10;     // K
 
-    private final CardLookupService cardLookupService;
+    private final CardBatchLookupService cardBatchLookupService;
     private final CollectionCardRepository cardRepository;
     private final MagicSetRepository setRepository;
     private final SetPersistenceService setPersistenceService;
     private final long throttleMs;
 
-    public CollectionImportService(CardLookupService cardLookupService,
+    public CollectionImportService(CardBatchLookupService cardBatchLookupService,
                                    CollectionCardRepository cardRepository,
                                    MagicSetRepository setRepository,
                                    SetPersistenceService setPersistenceService,
-                                   @Value("${mtg.import.throttle-ms:300}") long throttleMs) {
-        this.cardLookupService = cardLookupService;
+                                   @Value("${mtg.import.throttle-ms:100}") long throttleMs) {
+        this.cardBatchLookupService = cardBatchLookupService;
         this.cardRepository = cardRepository;
         this.setRepository = setRepository;
         this.setPersistenceService = setPersistenceService;
@@ -110,7 +119,7 @@ public class CollectionImportService {
             } catch (RuntimeException e) {
                 log.warn("Auto-sync of sets failed: {}", e.getMessage());
                 job.addError("Não foi possível sincronizar os sets automaticamente: " + e.getMessage()
-                        + ". As linhas ser\u00e3o gravadas sem set_code resolvido.");
+                        + ". As linhas serão gravadas sem set_code resolvido.");
             }
         }
 
@@ -119,14 +128,32 @@ public class CollectionImportService {
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsxBytes))) {
             job.setTotal(countImportableRows(workbook));
 
+            // Phase 1: parse every sheet and accumulate RowContext objects.
+            // No Scryfall traffic yet — we just collect identifiers.
+            List<RowContext> rows = new ArrayList<>();
             for (int s = 0; s < workbook.getNumberOfSheets(); s++) {
                 Sheet sheet = workbook.getSheetAt(s);
                 if (!hasExpectedHeader(sheet)) {
                     log.debug("Skipping sheet '{}' (header mismatch)", sheet.getSheetName());
                     continue;
                 }
-                job.setCurrentSheet(sheet.getSheetName());
-                processSheet(sheet, setsByName, job, unresolved);
+                collectSheetRows(sheet, setsByName, rows);
+            }
+
+            // Phase 2: batch-lookup every row that needs a Scryfall response.
+            Map<String, ScryfallCard> cardIndex = lookupCards(rows, job);
+
+            // Phase 3: write enriched cells, persist to DB, record unresolved.
+            for (RowContext ctx : rows) {
+                job.setCurrentSheet(ctx.sheetName);
+                try {
+                    applyRow(ctx, cardIndex, job, unresolved);
+                } catch (RuntimeException e) {
+                    log.warn("Erro processando {}: {}", ctx.rowRef, e.getMessage());
+                    job.addError(ctx.rowRef + ": " + e.getMessage());
+                } finally {
+                    job.incrementProcessed();
+                }
             }
 
             appendUnresolvedSheet(workbook, unresolved);
@@ -182,134 +209,163 @@ public class CollectionImportService {
         return !isBlank(card) || !isBlank(set);
     }
 
-    private void processSheet(Sheet sheet,
-                              Map<String, MagicSet> setsByName,
-                              ImportJob job,
-                              List<UnresolvedRow> unresolved) {
+    private void collectSheetRows(Sheet sheet,
+                                  Map<String, MagicSet> setsByName,
+                                  List<RowContext> sink) {
         for (int r = FIRST_DATA_ROW; r <= sheet.getLastRowNum(); r++) {
             Row row = sheet.getRow(r);
             if (row == null) continue;
             if (!isDataRow(row)) continue;
 
-            String rowRef = sheet.getSheetName() + "!" + (r + 1);
-            try {
-                processRow(sheet, row, r, rowRef, setsByName, job, unresolved);
-            } catch (RuntimeException e) {
-                log.warn("Erro processando {}: {}", rowRef, e.getMessage());
-                job.addError(rowRef + ": " + e.getMessage());
-            } finally {
-                job.incrementProcessed();
-            }
-        }
-    }
+            String number = readString(row.getCell(COL_NUMBER));
+            String cardName = readString(row.getCell(COL_CARD));
+            String setName = readString(row.getCell(COL_SET));
+            String foilText = readString(row.getCell(COL_FOIL));
+            int quantity = readQuantity(row.getCell(COL_QTY));
+            String comentario = readString(row.getCell(COL_COMMENT));
+            String language = readString(row.getCell(COL_LANG));
+            String localizacao = readString(row.getCell(COL_LOC));
 
-    private void processRow(Sheet sheet,
-                            Row row,
-                            int rowIndex,
-                            String rowRef,
-                            Map<String, MagicSet> setsByName,
-                            ImportJob job,
-                            List<UnresolvedRow> unresolved) {
-        String number = readString(row.getCell(COL_NUMBER));
-        String cardName = readString(row.getCell(COL_CARD));
-        String setName = readString(row.getCell(COL_SET));
-        String foilText = readString(row.getCell(COL_FOIL));
-        int quantity = readQuantity(row.getCell(COL_QTY));
-        String comentario = readString(row.getCell(COL_COMMENT));
-        String language = readString(row.getCell(COL_LANG));
-        String localizacao = readString(row.getCell(COL_LOC));
+            boolean foil = isFoilYes(foilText);
+            boolean manualOverride = comentario != null
+                    && comentario.trim().toLowerCase(Locale.ROOT)
+                            .startsWith(MANUAL_FLAG.toLowerCase(Locale.ROOT));
 
-        boolean foil = isFoilYes(foilText);
-        boolean manualOverride = comentario != null
-                && comentario.trim().toLowerCase(Locale.ROOT)
-                        .startsWith(MANUAL_FLAG.toLowerCase(Locale.ROOT));
+            MagicSet resolvedSet = setsByName.get(normalize(setName));
+            String setCode = resolvedSet != null ? resolvedSet.getSetCode() : null;
 
-        MagicSet resolvedSet = setsByName.get(normalize(setName));
-        String setCode = resolvedSet != null ? resolvedSet.getSetCode() : null;
-        String cardNumber = number;
-        String cardType = null;
-        BigDecimal price = null;
+            RowContext ctx = new RowContext();
+            ctx.sheet = sheet;
+            ctx.sheetName = sheet.getSheetName();
+            ctx.rowIndex = r;
+            ctx.rowRef = sheet.getSheetName() + "!" + (r + 1);
+            ctx.row = row;
+            ctx.number = number;
+            ctx.cardName = cardName;
+            ctx.setName = setName;
+            ctx.foilText = foilText;
+            ctx.quantity = quantity;
+            ctx.comentario = comentario;
+            ctx.language = language;
+            ctx.localizacao = localizacao;
+            ctx.foil = foil;
+            ctx.manualOverride = manualOverride;
+            ctx.setCode = setCode;
 
-        if (manualOverride) {
-            // For manual overrides we must preserve the user's existing E/G
-            // values (often formulas) in the spreadsheet. Read the cached
-            // results for DB persistence but leave the cells untouched.
-            cardType = readString(row.getCell(COL_TYPE));
-            price = readBigDecimal(row.getCell(COL_PRICE));
-        } else {
-            String unresolvedReason = null;
-            String attemptedUrl = null;
-            if (setCode == null) {
-                unresolvedReason = "set '" + setName + "' não encontrado na base de sets";
-                job.addError(rowRef + ": " + unresolvedReason
-                        + " — linha gravada sem preço (sincronize os sets para enriquecer).");
-            } else {
-                attemptedUrl = expectedLookupUrl(cardName, number, setCode);
-                try {
-                    ScryfallCard scryfallCard = lookupCard(cardName, number, setCode, rowRef);
-                    if (scryfallCard != null) {
-                        cardType = scryfallCard.getTypeLine();
-                        if (cardNumber == null || cardNumber.isBlank()) {
-                            cardNumber = scryfallCard.getCollectorNumber();
-                        }
-                        price = priceFrom(scryfallCard, foil);
-                    } else {
-                        unresolvedReason = "Scryfall retornou resposta vazia";
-                    }
-                } catch (ScryfallLookupException e) {
-                    if (e.getUrl() != null) attemptedUrl = e.getUrl();
-                    unresolvedReason = "Scryfall falhou: " + e.getMessage();
-                    job.addError(rowRef + ": " + unresolvedReason + " — linha gravada sem preço.");
-                } catch (RuntimeException e) {
-                    unresolvedReason = "Scryfall falhou: " + e.getMessage();
-                    job.addError(rowRef + ": " + unresolvedReason + " — linha gravada sem preço.");
+            if (manualOverride) {
+                // Preserve whatever the user already had in E/G (often a formula)
+                // but still read the cached value for the DB.
+                ctx.cardType = readString(row.getCell(COL_TYPE));
+                ctx.price = readBigDecimal(row.getCell(COL_PRICE));
+            } else if (setCode != null) {
+                // Prefer (set, collector_number) — deterministic, handles reprints
+                // and promo variants — and fall back to (set, name) when the row
+                // has no collector number.
+                if (number != null && !number.isBlank()) {
+                    ctx.identifier = ScryfallCardIdentifier.bySetAndNumber(setCode, number);
+                    ctx.matchKey = keyBySetAndNumber(setCode, number);
+                } else if (!isBlank(cardName)) {
+                    ctx.identifier = ScryfallCardIdentifier.byNameAndSet(cardName, setCode);
+                    ctx.matchKey = keyByNameAndSet(setCode, cardName);
                 }
-                throttle();
             }
-            // Only overwrite the cells when we actually resolved a value,
-            // so rows whose lookup failed keep whatever the user had there.
-            if (cardType != null) writeCellString(row, COL_TYPE, cardType);
-            if (price != null) writeCellNumeric(row, COL_PRICE, price);
 
-            if (unresolvedReason != null) {
-                unresolved.add(new UnresolvedRow(
-                        sheet.getSheetName(), rowIndex + 1,
-                        number, cardName, setName, foilText, unresolvedReason, attemptedUrl));
-            }
+            sink.add(ctx);
         }
-
-        persist(rowRef, cardName, setCode, setName, foil, quantity, cardType,
-                cardNumber, price, comentario, language, localizacao, job);
-    }
-
-    private ScryfallCard lookupCard(String cardName, String number, String setCode, String rowRef) {
-        if (number != null && !number.isBlank()) {
-            try {
-                return cardLookupService.getCardBySetAndNumber(setCode, number);
-            } catch (RuntimeException e) {
-                log.debug("{} lookup by number failed ({}), falling back to name", rowRef, e.getMessage());
-            }
-        }
-        if (cardName == null || cardName.isBlank()) {
-            throw new IllegalArgumentException("Linha sem nome de carta nem número");
-        }
-        return cardLookupService.getCardByNameAndSet(cardName, setCode);
     }
 
     /**
-     * Computes the URL that {@link #lookupCard} will attempt last. Matches the
-     * fallback logic: if a collector number is present we try that endpoint
-     * first, but the final attempt (and thus the most useful URL to surface
-     * when the lookup fails) is name+set unless the name is blank.
+     * Issues the batched {@code POST /cards/collection} request(s) for every
+     * row that has an identifier, and returns a lookup keyed by
+     * {@link #keyBySetAndNumber} or {@link #keyByNameAndSet}. Rows keep
+     * their match keys so we can reassociate the response.
      */
-    private String expectedLookupUrl(String cardName, String number, String setCode) {
-        if (cardName != null && !cardName.isBlank()) {
-            return cardLookupService.absoluteUrl(cardLookupService.urlByNameAndSet(cardName, setCode));
+    private Map<String, ScryfallCard> lookupCards(List<RowContext> rows, ImportJob job) {
+        List<ScryfallCardIdentifier> identifiers = new ArrayList<>();
+        for (RowContext ctx : rows) {
+            if (ctx.identifier != null) identifiers.add(ctx.identifier);
         }
-        if (number != null && !number.isBlank()) {
-            return cardLookupService.absoluteUrl(cardLookupService.urlBySetAndNumber(setCode, number));
+        if (identifiers.isEmpty()) return Map.of();
+
+        List<ScryfallCardIdentifier> notFound = new ArrayList<>();
+        List<ScryfallCard> matched;
+        try {
+            matched = cardBatchLookupService.getCardsBatch(identifiers, throttleMs, notFound);
+        } catch (ScryfallLookupException e) {
+            job.addError("Falha na consulta em batch ao Scryfall: " + e.getMessage()
+                    + " — linhas sem preço.");
+            log.warn("Batch lookup failed: {}", e.getMessage());
+            return Map.of();
         }
-        return null;
+
+        Map<String, ScryfallCard> index = new HashMap<>(matched.size() * 2);
+        for (ScryfallCard card : matched) {
+            if (card == null || card.getSet() == null) continue;
+            String set = card.getSet();
+            if (card.getCollectorNumber() != null) {
+                index.putIfAbsent(keyBySetAndNumber(set, card.getCollectorNumber()), card);
+            }
+            if (card.getName() != null) {
+                index.putIfAbsent(keyByNameAndSet(set, card.getName()), card);
+            }
+        }
+        if (!notFound.isEmpty()) {
+            log.info("Scryfall /cards/collection reportou {} identificador(es) não encontrado(s)",
+                    notFound.size());
+        }
+        return index;
+    }
+
+    private void applyRow(RowContext ctx,
+                          Map<String, ScryfallCard> cardIndex,
+                          ImportJob job,
+                          List<UnresolvedRow> unresolved) {
+        String cardNumber = ctx.number;
+        String cardType = ctx.cardType;
+        BigDecimal price = ctx.price;
+
+        if (!ctx.manualOverride) {
+            String unresolvedReason = null;
+            if (ctx.setCode == null) {
+                unresolvedReason = "set '" + ctx.setName + "' não encontrado na base de sets";
+                job.addError(ctx.rowRef + ": " + unresolvedReason
+                        + " — linha gravada sem preço (sincronize os sets para enriquecer).");
+            } else if (ctx.matchKey == null) {
+                unresolvedReason = "linha sem nome da carta nem collector_number";
+                job.addError(ctx.rowRef + ": " + unresolvedReason + ".");
+            } else {
+                ScryfallCard card = cardIndex.get(ctx.matchKey);
+                if (card != null) {
+                    cardType = card.getTypeLine();
+                    if (isBlank(cardNumber)) cardNumber = card.getCollectorNumber();
+                    price = priceFrom(card, ctx.foil);
+                } else {
+                    unresolvedReason = "Scryfall não retornou a carta para essa combinação de set/nome/número";
+                }
+            }
+
+            // Only overwrite E/G when we actually resolved a value so rows whose
+            // lookup failed keep whatever the user had there.
+            if (cardType != null) writeCellString(ctx.row, COL_TYPE, cardType);
+            if (price != null) writeCellNumeric(ctx.row, COL_PRICE, price);
+
+            if (unresolvedReason != null) {
+                unresolved.add(new UnresolvedRow(
+                        ctx.sheetName, ctx.rowIndex + 1,
+                        ctx.number, ctx.cardName, ctx.setName, ctx.foilText, unresolvedReason));
+            }
+        }
+
+        persist(ctx.rowRef, ctx.cardName, ctx.setCode, ctx.setName, ctx.foil, ctx.quantity, cardType,
+                cardNumber, price, ctx.comentario, ctx.language, ctx.localizacao, job);
+    }
+
+    private String keyBySetAndNumber(String setCode, String collectorNumber) {
+        return "n|" + normalize(setCode) + "|" + normalize(collectorNumber);
+    }
+
+    private String keyByNameAndSet(String setCode, String cardName) {
+        return "c|" + normalize(setCode) + "|" + normalize(cardName);
     }
 
     private BigDecimal priceFrom(ScryfallCard card, boolean foil) {
@@ -471,14 +527,6 @@ public class CollectionImportService {
         return base + "-processado.xlsx";
     }
 
-    private void throttle() {
-        try {
-            if (throttleMs > 0) Thread.sleep(throttleMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-    }
-
     /**
      * Appends a "Não encontradas" sheet to the output workbook summarising
      * every data row whose Scryfall lookup failed or whose set could not be
@@ -495,7 +543,7 @@ public class CollectionImportService {
         }
         Sheet sheet = workbook.createSheet(name);
 
-        String[] headers = {"Aba", "Linha", "Number", "Card", "Set", "Foil", "Motivo", "URL"};
+        String[] headers = {"Aba", "Linha", "Number", "Card", "Set", "Foil", "Motivo"};
         Row headerRow = sheet.createRow(0);
         for (int i = 0; i < headers.length; i++) {
             headerRow.createCell(i, CellType.STRING).setCellValue(headers[i]);
@@ -511,12 +559,39 @@ public class CollectionImportService {
             row.createCell(4, CellType.STRING).setCellValue(u.set() == null ? "" : u.set());
             row.createCell(5, CellType.STRING).setCellValue(u.foil() == null ? "" : u.foil());
             row.createCell(6, CellType.STRING).setCellValue(u.reason() == null ? "" : u.reason());
-            row.createCell(7, CellType.STRING).setCellValue(u.url() == null ? "" : u.url());
         }
 
         for (int i = 0; i < headers.length; i++) {
             sheet.autoSizeColumn(i);
         }
+    }
+
+    /** Row-level context accumulated during parsing and consumed in a second pass. */
+    private static final class RowContext {
+        Sheet sheet;
+        String sheetName;
+        int rowIndex;         // 0-based POI index
+        String rowRef;        // "<sheet>!<1-based row>"
+        Row row;
+
+        String number;
+        String cardName;
+        String setName;
+        String foilText;
+        int quantity;
+        String comentario;
+        String language;
+        String localizacao;
+
+        boolean foil;
+        boolean manualOverride;
+        String setCode;       // resolved from local magic_set
+
+        ScryfallCardIdentifier identifier; // null when no lookup is needed
+        String matchKey;                   // key under which the response is indexed
+
+        String cardType;      // pre-populated for manual rows
+        BigDecimal price;     // pre-populated for manual rows
     }
 
     private record UnresolvedRow(String sheet,
@@ -525,7 +600,6 @@ public class CollectionImportService {
                                  String card,
                                  String set,
                                  String foil,
-                                 String reason,
-                                 String url) {
+                                 String reason) {
     }
 }
