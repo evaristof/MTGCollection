@@ -145,6 +145,15 @@ export const api = {
     request<void>(`/api/collection/datadumps/${encodeURIComponent(timestamp)}`, {
       method: 'DELETE',
     }),
+  dumpTotalValues: (params: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams()
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<Array<{ data_dump_date_time: string; total_value: number }>>(
+      `/api/collection/datadumps/stats/total-value${suffix}`,
+    )
+  },
 
   // Collection import (async)
   importCollection: async (file: File): Promise<ImportJobSnapshot> => {

@@ -1,6 +1,7 @@
 package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.CollectionCardDataDump;
+import com.evaristof.mtgcollection.repository.CollectionCardDataDumpRepository;
 import com.evaristof.mtgcollection.service.CollectionCardDataDumpService;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.http.HttpStatus;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
@@ -72,6 +74,40 @@ public class CollectionCardDataDumpController {
         return ResponseEntity.ok(rows.stream().map(DumpCardResponse::from).toList());
     }
 
+    /**
+     * Per-dump total value of the collection ({@code SUM(price * quantity)})
+     * for every snapshot captured in {@code [from, to]}. Feeds the first
+     * chart on the "Gráficos" page.
+     *
+     * <p>Both bounds are optional ISO-8601 local-datetimes (e.g.
+     * {@code 2025-11-18T00:00}). If omitted, the range is unbounded on
+     * that side. Malformed bounds return {@code 400}.</p>
+     */
+    @GetMapping("/stats/total-value")
+    public ResponseEntity<?> totalValuePerDump(
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to) {
+        LocalDateTime parsedFrom = null;
+        LocalDateTime parsedTo = null;
+        if (from != null && !from.isBlank()) {
+            parsedFrom = tryParse(from);
+            if (parsedFrom == null) {
+                return ResponseEntity.badRequest().body(java.util.Map.of(
+                        "message", "from inválido: " + from));
+            }
+        }
+        if (to != null && !to.isBlank()) {
+            parsedTo = tryParse(to);
+            if (parsedTo == null) {
+                return ResponseEntity.badRequest().body(java.util.Map.of(
+                        "message", "to inválido: " + to));
+            }
+        }
+        List<CollectionCardDataDumpRepository.DumpTotal> rows =
+                service.totalValuePerDump(parsedFrom, parsedTo);
+        return ResponseEntity.ok(rows.stream().map(DumpTotalResponse::from).toList());
+    }
+
     @DeleteMapping("/{timestamp}")
     public ResponseEntity<?> delete(@PathVariable("timestamp") String timestamp) {
         LocalDateTime parsed = tryParse(timestamp);
@@ -96,6 +132,21 @@ public class CollectionCardDataDumpController {
     /** Response body for {@code POST /api/collection/datadumps}. */
     public record DumpCreatedResponse(
             @JsonProperty("data_dump_date_time") LocalDateTime dataDumpDateTime) {
+    }
+
+    /**
+     * Shape returned by {@code GET /stats/total-value}. One entry per
+     * dump, already ordered chronologically, with the aggregated value
+     * precomputed on the DB side.
+     */
+    public record DumpTotalResponse(
+            @JsonProperty("data_dump_date_time") LocalDateTime dataDumpDateTime,
+            @JsonProperty("total_value") BigDecimal totalValue) {
+
+        static DumpTotalResponse from(CollectionCardDataDumpRepository.DumpTotal t) {
+            BigDecimal value = t.totalValue() != null ? t.totalValue() : BigDecimal.ZERO;
+            return new DumpTotalResponse(t.timestamp(), value);
+        }
     }
 
     /**
