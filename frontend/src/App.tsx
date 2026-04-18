@@ -1,22 +1,55 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import './App.css'
 
+const STORAGE_KEY = 'mtgcollection.sidebar.collapsed'
+
 function App() {
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(STORAGE_KEY) === '1'
+  })
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0')
+  }, [collapsed])
+
   return (
-    <div className="app">
-      <header className="app__header">
-        <div className="app__brand">
-          <h1>MTGCollection</h1>
-          <p className="muted">Gestão da sua coleção de Magic: The Gathering</p>
+    <div className={`app ${collapsed ? 'app--collapsed' : ''}`}>
+      <aside className="sidebar" aria-label="Navegação principal">
+        <div className="sidebar__top">
+          {!collapsed && (
+            <div className="sidebar__brand">
+              <strong>MTGCollection</strong>
+              <span className="muted">Magic: The Gathering</span>
+            </div>
+          )}
+          <button
+            type="button"
+            className="sidebar__toggle"
+            onClick={() => setCollapsed((c) => !c)}
+            aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}
+            aria-expanded={!collapsed}
+            title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+          >
+            <span aria-hidden>{collapsed ? '»' : '«'}</span>
+          </button>
         </div>
-        <nav className="app__nav">
-          <NavLink to="/" end>
-            Home
+        <nav className="sidebar__nav">
+          <NavLink to="/" end title="Home">
+            <span className="sidebar__icon" aria-hidden>⌂</span>
+            <span className="sidebar__label">Home</span>
           </NavLink>
-          <NavLink to="/sets">Sets</NavLink>
-          <NavLink to="/cards">Cartas</NavLink>
+          <NavLink to="/sets" title="Sets">
+            <span className="sidebar__icon" aria-hidden>▦</span>
+            <span className="sidebar__label">Sets</span>
+          </NavLink>
+          <NavLink to="/cards" title="Cartas">
+            <span className="sidebar__icon" aria-hidden>♦</span>
+            <span className="sidebar__label">Cartas</span>
+          </NavLink>
         </nav>
-      </header>
+      </aside>
 
       <main className="app__main">
         <Outlet />

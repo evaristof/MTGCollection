@@ -17,14 +17,30 @@ import type {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    ...init,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...init,
+    })
+  } catch (err) {
+    throw new Error(
+      `Não foi possível conectar ao backend em ${API_BASE_URL || window.location.origin}. ` +
+        'Verifique se o Spring Boot está rodando em http://localhost:8080. ' +
+        `(${err instanceof Error ? err.message : String(err)})`,
+    )
+  }
   if (!res.ok) {
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error(
+        `Backend indisponível (HTTP ${res.status}). ` +
+          'O proxy do Vite não conseguiu alcançar o Spring Boot. ' +
+          'Verifique se a aplicação Java está rodando em http://localhost:8080.',
+      )
+    }
     let details = ''
     try {
       details = await res.text()
