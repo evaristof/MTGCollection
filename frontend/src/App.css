@@ -389,6 +389,93 @@ label.inline {
   color: var(--fg-soft);
 }
 
+/* ---------- Combobox (SetCombo) ---------- */
+
+.combo {
+  position: relative;
+  display: inline-block;
+  min-width: 220px;
+}
+
+.combo__button {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.combo__button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.combo__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.combo__button[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.combo__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.combo__arrow {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--fg-soft);
+}
+
+.combo__list {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--bg-alt);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.combo__option {
+  padding: 0.45rem 0.65rem;
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.combo__option--active {
+  background: rgba(125, 173, 255, 0.12);
+}
+
+.combo__option--selected {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
 /* ---------- Sortable headers ---------- */
 
 thead th[aria-sort] {
