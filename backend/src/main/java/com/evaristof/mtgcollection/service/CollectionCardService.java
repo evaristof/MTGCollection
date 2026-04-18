@@ -84,10 +84,23 @@ public class CollectionCardService {
     }
 
     /**
-     * Updates mutable attributes of an existing collection entry. Does not
-     * touch scryfall-derived fields ({@code cardNumber}, {@code cardType})
-     * because those are stable for a given (set, number); use
-     * {@link #addCardToCollection} for a fresh lookup.
+     * Updates mutable attributes of an existing collection entry.
+     *
+     * <p>Semantics per argument:
+     * <ul>
+     *   <li>{@code cardName} / {@code setCode}: {@code null} or blank →
+     *       do not change; otherwise replace.</li>
+     *   <li>{@code foil} / {@code language} / {@code quantity}: always
+     *       replaced (required fields on the request).</li>
+     *   <li>{@code cardType} / {@code comentario} / {@code localizacao}:
+     *       {@code null} → do not change; empty string → clear
+     *       (persist {@code null}); otherwise replace (trimmed).</li>
+     *   <li>{@code price}: {@code null} → do not change; otherwise
+     *       replace (callers that wish to clear the price must fetch the
+     *       row, null it out, then persist explicitly — we do not overload
+     *       a sentinel here because {@link java.math.BigDecimal} already
+     *       distinguishes zero from "unset").</li>
+     * </ul>
      */
     @Transactional
     public CollectionCard update(Long id,
@@ -95,7 +108,11 @@ public class CollectionCardService {
                                  String setCode,
                                  boolean foil,
                                  String language,
-                                 int quantity) {
+                                 int quantity,
+                                 String cardType,
+                                 BigDecimal price,
+                                 String comentario,
+                                 String localizacao) {
         if (language == null || language.isBlank()) {
             throw new IllegalArgumentException("language must not be blank");
         }
@@ -112,6 +129,21 @@ public class CollectionCardService {
         existing.setFoil(foil);
         existing.setLanguage(language);
         existing.setQuantity(quantity);
+        if (cardType != null) {
+            String trimmed = cardType.trim();
+            existing.setCardType(trimmed.isEmpty() ? null : trimmed);
+        }
+        if (price != null) {
+            existing.setPrice(price);
+        }
+        if (comentario != null) {
+            String trimmed = comentario.trim();
+            existing.setComentario(trimmed.isEmpty() ? null : trimmed);
+        }
+        if (localizacao != null) {
+            String trimmed = localizacao.trim();
+            existing.setLocalizacao(trimmed.isEmpty() ? null : trimmed);
+        }
         return repository.save(existing);
     }
 

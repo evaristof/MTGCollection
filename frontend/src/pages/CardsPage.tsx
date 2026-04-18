@@ -15,6 +15,11 @@ type EditFormState = {
   foil: boolean
   language: string
   quantity: number
+  card_type: string
+  // Campos opcionais ficam como string no form (`''` = limpar ao salvar).
+  price: string
+  comentario: string
+  localizacao: string
 }
 
 const EMPTY_ADD: AddFormState = {
@@ -247,6 +252,10 @@ export default function CardsPage() {
       foil: c.foil,
       language: c.language,
       quantity: c.quantity,
+      card_type: c.card_type ?? '',
+      price: c.price === null || c.price === undefined ? '' : String(c.price),
+      comentario: c.comentario ?? '',
+      localizacao: c.localizacao ?? '',
     })
   }
 
@@ -256,12 +265,27 @@ export default function CardsPage() {
     setError(null)
     setSaving(true)
     try {
+      // Para preço, string vazia = limpar (mandamos `null`); caso contrário
+      // parseamos como float. Parse inválido → mantém no frontend (não
+      // envia `price`, então o backend não altera).
+      let priceField: number | null | undefined
+      const rawPrice = editing.price.trim()
+      if (rawPrice === '') {
+        priceField = null
+      } else {
+        const parsed = Number(rawPrice.replace(',', '.'))
+        priceField = Number.isFinite(parsed) ? parsed : undefined
+      }
       await api.updateCard(editing.id, {
         card_name: editing.card_name.trim() || undefined,
         set_code: editing.set_code.trim() || undefined,
         foil: editing.foil,
         language: editing.language.trim(),
         quantity: editing.quantity,
+        card_type: editing.card_type,
+        price: priceField,
+        comentario: editing.comentario,
+        localizacao: editing.localizacao,
       })
       setEditing(null)
       await loadCards()
@@ -653,6 +677,41 @@ export default function CardsPage() {
                 onChange={(e) => setEditing({ ...editing, foil: e.target.checked })}
               />
               <span>Foil</span>
+            </label>
+            <label>
+              <span>Tipo</span>
+              <input
+                value={editing.card_type}
+                onChange={(e) => setEditing({ ...editing, card_type: e.target.value })}
+                placeholder="ex.: Instant"
+              />
+            </label>
+            <label>
+              <span>Preço (US$)</span>
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                value={editing.price}
+                onChange={(e) => setEditing({ ...editing, price: e.target.value })}
+                placeholder="ex.: 1.23"
+              />
+            </label>
+            <label>
+              <span>Comentário</span>
+              <input
+                value={editing.comentario}
+                onChange={(e) => setEditing({ ...editing, comentario: e.target.value })}
+                placeholder="observações"
+              />
+            </label>
+            <label>
+              <span>Localização</span>
+              <input
+                value={editing.localizacao}
+                onChange={(e) => setEditing({ ...editing, localizacao: e.target.value })}
+                placeholder="ex.: Caixa A / Página 3"
+              />
             </label>
           </div>
           <div className="form__actions">
