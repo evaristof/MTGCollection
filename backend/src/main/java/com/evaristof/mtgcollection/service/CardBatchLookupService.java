@@ -5,6 +5,7 @@ import com.evaristof.mtgcollection.scryfall.dto.ScryfallBatchResponse;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardIdentifier;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,15 @@ public class CardBatchLookupService {
 
     private final ScryfallHttpClient httpClient;
     private final Gson gson;
+    /**
+     * Scryfall's {@code /cards/collection} treats the mere presence of a key
+     * as “use this identifier shape”, so a serialized {@code {"name": null,
+     * "set": "zen", "collector_number": "180"}} is rejected with
+     * {@code "A `name` identifier must be a string: "}. We therefore use a
+     * dedicated Gson that omits null fields when building the request body,
+     * independently of the application-wide {@code serializeNulls()} bean.
+     */
+    private static final Gson REQUEST_GSON = new GsonBuilder().create();
 
     public CardBatchLookupService(ScryfallHttpClient httpClient, Gson gson) {
         this.httpClient = httpClient;
@@ -95,7 +105,7 @@ public class CardBatchLookupService {
     private ScryfallBatchResponse postBatch(List<ScryfallCardIdentifier> batch) {
         Map<String, Object> body = new HashMap<>();
         body.put("identifiers", batch);
-        String json = gson.toJson(body);
+        String json = REQUEST_GSON.toJson(body);
         String url = httpClient.getBaseUrl() + "/cards/collection";
         try {
             String responseBody = httpClient.postJson("/cards/collection", json);
