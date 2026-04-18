@@ -172,6 +172,49 @@ class CollectionImportServiceTest {
         }
     }
 
+    @Test
+    void doubleFacedCard_isResolvedByFrontFaceName() throws Exception {
+        // Reproduces the bug where double-faced cards (e.g. "Jace, Vryn's Prodigy"
+        // → "Jace, Telepath Unbound") always land in "Não encontradas" even
+        // though Scryfall did return the card. Root cause: Scryfall responds
+        // with the full canonical name "Front // Back", which doesn't match
+        // the row's match key built from just the front-face name.
+        MagicSet ori = new MagicSet();
+        ori.setSetCode("ori");
+        ori.setSetName("Magic Origins");
+        when(setRepository.findAll()).thenReturn(List.of(ori));
+
+        ScryfallCard jace = new ScryfallCard();
+        jace.setName("Jace, Vryn's Prodigy // Jace, Telepath Unbound");
+        jace.setSet("ori");
+        jace.setCollectorNumber("60");
+        jace.setTypeLine("Legendary Creature — Human Wizard");
+        ScryfallPrices prices = new ScryfallPrices();
+        prices.setUsd("5.00");
+        jace.setPrices(prices);
+
+        when(batchLookup.getCardsBatch(ArgumentMatchers.<List<ScryfallCardIdentifier>>any(),
+                anyLong(), any()))
+                .thenReturn(List.of(jace));
+
+        byte[] input = buildTemplateWorkbook("Jace, Vryn's Prodigy", "Magic Origins", "Não");
+
+        ImportJob job = new ImportJob("colecao.xlsx");
+        service.runImport(job, input);
+
+        try (XSSFWorkbook wb = new XSSFWorkbook(new ByteArrayInputStream(job.getResultBytes()))) {
+            Sheet sheet = wb.getSheetAt(0);
+            Row dataRow = sheet.getRow(3);
+
+            assertThat(readString(dataRow.getCell(4)))
+                    .as("DFC front-face lookup should resolve to the card's type_line")
+                    .isEqualTo("Legendary Creature — Human Wizard");
+            assertThat(readNumeric(dataRow.getCell(6)))
+                    .as("DFC front-face lookup should resolve to the USD price")
+                    .isEqualTo(5.00);
+        }
+    }
+
     private byte[] buildTemplateWorkbook(String cardName, String setName, String foil) throws Exception {
         try (XSSFWorkbook wb = new XSSFWorkbook();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {

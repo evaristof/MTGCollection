@@ -305,8 +305,20 @@ public class CollectionImportService {
             if (card.getCollectorNumber() != null) {
                 index.putIfAbsent(keyBySetAndNumber(set, card.getCollectorNumber()), card);
             }
+            // Scryfall returns double-faced cards with the canonical "Front // Back"
+            // name (e.g. "Jace, Vryn's Prodigy // Jace, Telepath Unbound"), but the
+            // user's spreadsheet only has the front-face name. Index both the full
+            // name and each individual face so the front-face lookup resolves.
             if (card.getName() != null) {
-                index.putIfAbsent(keyByNameAndSet(set, card.getName()), card);
+                String fullName = card.getName();
+                index.putIfAbsent(keyByNameAndSet(set, fullName), card);
+                if (fullName.contains(" // ")) {
+                    for (String face : fullName.split(" // ")) {
+                        if (!face.isBlank()) {
+                            index.putIfAbsent(keyByNameAndSet(set, face), card);
+                        }
+                    }
+                }
             }
         }
         if (!notFound.isEmpty()) {
