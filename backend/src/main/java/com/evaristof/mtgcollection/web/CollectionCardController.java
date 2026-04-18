@@ -2,6 +2,7 @@ package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.CollectionCard;
 import com.evaristof.mtgcollection.service.CollectionCardService;
+import com.evaristof.mtgcollection.service.ScryfallLookupException;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -68,6 +69,33 @@ public class CollectionCardController {
         return service.delete(id)
                 ? ResponseEntity.noContent().build()
                 : ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+    }
+
+    /**
+     * Re-queries Scryfall for this single row and persists the refreshed
+     * {@code card_type}/{@code price} (and {@code card_number} when it was
+     * previously empty). Used by the "Sincronizar" button on the Cards page.
+     *
+     * <p>Errors are surfaced to the frontend so a popup can be shown:
+     * {@code 404} when the id is unknown, {@code 422} when the row lacks
+     * enough data to look up, {@code 502} when Scryfall itself fails.</p>
+     */
+    @PostMapping("/{id}/sync")
+    public ResponseEntity<?> sync(@PathVariable("id") Long id) {
+        try {
+            return ResponseEntity.ok(service.syncCard(id));
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(java.util.Map.of("message", e.getMessage()));
+        } catch (IllegalStateException | IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("message", e.getMessage()));
+        } catch (ScryfallLookupException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(java.util.Map.of(
+                            "message", "Scryfall: " + e.getMessage(),
+                            "url", e.getUrl()));
+        }
     }
 
     /**

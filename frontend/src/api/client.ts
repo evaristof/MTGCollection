@@ -127,6 +127,8 @@ export const api = {
     }),
   deleteCard: (id: number) =>
     request<void>(`/api/collection/cards/${id}`, { method: 'DELETE' }),
+  syncCard: (id: number) =>
+    request<CollectionCard>(`/api/collection/cards/${id}/sync`, { method: 'POST' }),
 
   // Collection import (async)
   importCollection: async (file: File): Promise<ImportJobSnapshot> => {
