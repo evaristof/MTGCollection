@@ -62,6 +62,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- Força IPv4 também na JVM forked pelo `mvn spring-boot:run`. -->
+                    <jvmArguments>-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true</jvmArguments>
+                </configuration>
             </plugin>
         </plugins>
     </build>
