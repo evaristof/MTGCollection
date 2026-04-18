@@ -53,7 +53,6 @@ export default function SetsPage() {
   const [syncing, setSyncing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState('')
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 
   const loadSets = useCallback(async () => {
@@ -74,16 +73,64 @@ export default function SetsPage() {
     void loadSets()
   }, [loadSets])
 
+  // Os campos do form de set viram também filtros live do grid: cada campo
+  // preenchido restringe as linhas visíveis. Campos vazios / null /
+  // <= 0 (para números) não filtram. Em modo de edição (set_code travado)
+  // não aplicamos filtros — a intenção ali é editar a linha daquele set,
+  // não navegar na listagem.
   const filteredSets = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    if (!q) return sets
-    return sets.filter(
-      (s) =>
-        s.set_code.toLowerCase().includes(q) ||
-        s.set_name.toLowerCase().includes(q) ||
-        (s.block_name ?? '').toLowerCase().includes(q),
-    )
-  }, [sets, filter])
+    if (form._editingCode) return sets
+    const codeQ = form.set_code.trim().toLowerCase()
+    const nameQ = form.set_name.trim().toLowerCase()
+    const dateQ = (form.release_date ?? '').toString().trim()
+    const typeQ = (form.set_type ?? '').toString().trim().toLowerCase()
+    const blockCodeQ = (form.block_code ?? '').toString().trim().toLowerCase()
+    const blockNameQ = (form.block_name ?? '').toString().trim().toLowerCase()
+    const cardCountQ =
+      form.card_count === null || form.card_count === undefined
+        ? null
+        : Number(form.card_count)
+    const printedSizeQ =
+      form.printed_size === null || form.printed_size === undefined
+        ? null
+        : Number(form.printed_size)
+    const anyFilter =
+      codeQ ||
+      nameQ ||
+      dateQ ||
+      typeQ ||
+      blockCodeQ ||
+      blockNameQ ||
+      (cardCountQ !== null && cardCountQ > 0) ||
+      (printedSizeQ !== null && printedSizeQ > 0)
+    if (!anyFilter) return sets
+    return sets.filter((s) => {
+      if (codeQ && !s.set_code.toLowerCase().includes(codeQ)) return false
+      if (nameQ && !s.set_name.toLowerCase().includes(nameQ)) return false
+      if (dateQ && (s.release_date ?? '') !== dateQ) return false
+      if (typeQ && !(s.set_type ?? '').toLowerCase().includes(typeQ)) return false
+      if (blockCodeQ && !(s.block_code ?? '').toLowerCase().includes(blockCodeQ)) return false
+      if (blockNameQ && !(s.block_name ?? '').toLowerCase().includes(blockNameQ)) return false
+      if (cardCountQ !== null && cardCountQ > 0 && s.card_count !== cardCountQ) return false
+      if (printedSizeQ !== null && printedSizeQ > 0 && s.printed_size !== printedSizeQ)
+        return false
+      return true
+    })
+  }, [sets, form])
+
+  // Reset para a primeira página sempre que qualquer filtro mudar.
+  const filterKey = form._editingCode
+    ? `edit:${form._editingCode}`
+    : [
+        form.set_code,
+        form.set_name,
+        form.release_date,
+        form.set_type,
+        form.card_count ?? '',
+        form.printed_size ?? '',
+        form.block_code,
+        form.block_name,
+      ].join('|')
 
   const {
     pageRows,
@@ -99,7 +146,7 @@ export default function SetsPage() {
   } = useTableControls<MagicSet>({
     rows: filteredSets,
     initialSortKey: 'set_code',
-    resetKey: filter,
+    resetKey: filterKey,
   })
 
   const onSync = async () => {
@@ -171,12 +218,6 @@ export default function SetsPage() {
       <div className="toolbar">
         <h2>Sets {loading && <span className="muted">(carregando…)</span>}</h2>
         <div className="toolbar__actions">
-          <input
-            type="search"
-            placeholder="Filtrar por código / nome / bloco"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
           <button onClick={() => void loadSets()} disabled={loading}>
             Recarregar
           </button>
@@ -189,7 +230,16 @@ export default function SetsPage() {
       {error && <p className="error">{error}</p>}
 
       <form className="form" onSubmit={onSubmit}>
-        <h3>{form._editingCode ? `Editar set ${form._editingCode}` : 'Novo set'}</h3>
+        <h3>
+          {form._editingCode ? `Editar set ${form._editingCode}` : 'Novo set / filtrar sets'}
+        </h3>
+        {!form._editingCode && (
+          <p className="muted">
+            Os campos abaixo também filtram o grid conforme você digita. Clique em{' '}
+            <strong>Criar set</strong> para cadastrar um novo com esses valores (precisa de{' '}
+            <code>code</code> e <code>name</code>).
+          </p>
+        )}
         <div className="form__grid">
           <label>
             <span>Code*</span>
