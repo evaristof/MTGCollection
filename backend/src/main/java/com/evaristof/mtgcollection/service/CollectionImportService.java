@@ -13,6 +13,7 @@ import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
@@ -76,21 +77,22 @@ public class CollectionImportService {
     private static final int COL_LANG = 9;     // J
     private static final int COL_LOC = 10;     // K
 
-    private static final long SCRYFALL_THROTTLE_MS = 110L;
-
     private final CardLookupService cardLookupService;
     private final CollectionCardRepository cardRepository;
     private final MagicSetRepository setRepository;
     private final SetPersistenceService setPersistenceService;
+    private final long throttleMs;
 
     public CollectionImportService(CardLookupService cardLookupService,
                                    CollectionCardRepository cardRepository,
                                    MagicSetRepository setRepository,
-                                   SetPersistenceService setPersistenceService) {
+                                   SetPersistenceService setPersistenceService,
+                                   @Value("${mtg.import.throttle-ms:300}") long throttleMs) {
         this.cardLookupService = cardLookupService;
         this.cardRepository = cardRepository;
         this.setRepository = setRepository;
         this.setPersistenceService = setPersistenceService;
+        this.throttleMs = Math.max(0L, throttleMs);
     }
 
     /**
@@ -449,7 +451,7 @@ public class CollectionImportService {
 
     private void throttle() {
         try {
-            Thread.sleep(SCRYFALL_THROTTLE_MS);
+            if (throttleMs > 0) Thread.sleep(throttleMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
