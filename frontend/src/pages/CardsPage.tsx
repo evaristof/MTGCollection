@@ -25,6 +25,30 @@ const EMPTY_ADD: AddFormState = {
   quantity: 1,
 }
 
+/**
+ * Pulls a user-friendly message out of an error thrown by `api.*`.
+ *
+ * The backend answers sync failures with a JSON body like `{"message": "..."}`;
+ * `request()` wraps the raw body into `Request failed <status>: <body>`. We try
+ * to parse the trailing JSON so the popup shows just the message instead of
+ * the full noisy envelope.
+ */
+function extractErrorMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err)
+  const jsonStart = raw.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(raw.slice(jsonStart)) as { message?: unknown }
+      if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        return parsed.message
+      }
+    } catch {
+      // fall through to raw
+    }
+  }
+  return raw
+}
+
 export default function CardsPage() {
   const [cards, setCards] = useState<CollectionCard[]>([])
   const [sets, setSets] = useState<MagicSet[]>([])
@@ -35,6 +59,7 @@ export default function CardsPage() {
   const [addForm, setAddForm] = useState<AddFormState>(EMPTY_ADD)
   const [editing, setEditing] = useState<EditFormState | null>(null)
   const [importOpen, setImportOpen] = useState(false)
+  const [syncingId, setSyncingId] = useState<number | null>(null)
 
   const loadCards = useCallback(async () => {
     setLoading(true)
@@ -195,6 +220,20 @@ export default function CardsPage() {
       await loadCards()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  const onSync = async (id: number) => {
+    setSyncingId(id)
+    try {
+      const updated = await api.syncCard(id)
+      // Merge the refreshed row in place — avoids a full reload and
+      // preserves the user's current sort/page/filter.
+      setCards((prev) => prev.map((c) => (c.id === id ? updated : c)))
+    } catch (err) {
+      alert(`Falha ao sincronizar carta #${id}:\n\n${extractErrorMessage(err)}`)
+    } finally {
+      setSyncingId(null)
     }
   }
 
@@ -394,6 +433,14 @@ export default function CardsPage() {
                       <button type="button" onClick={() => onStartEdit(c)}>Editar</button>
                       <button type="button" className="danger" onClick={() => void onDelete(c.id)}>
                         Deletar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onSync(c.id)}
+                        disabled={syncingId === c.id}
+                        title="Buscar tipo e preço no Scryfall"
+                      >
+                        {syncingId === c.id ? 'Sincronizando…' : 'Sincronizar'}
                       </button>
                     </td>
                   </tr>

@@ -3,9 +3,11 @@ package com.evaristof.mtgcollection.service;
 import com.evaristof.mtgcollection.domain.CollectionCard;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
+import com.evaristof.mtgcollection.scryfall.dto.ScryfallPrices;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -120,5 +122,80 @@ public class CollectionCardService {
         }
         repository.deleteById(id);
         return true;
+    }
+
+    /**
+     * Refreshes the Scryfall-derived fields ({@code cardType} and {@code price})
+     * of a single row by querying Scryfall and persisting the result.
+     *
+     * <p>Lookup precedence mirrors the import flow: if {@code setCode} and
+     * {@code cardNumber} are both filled, we use
+     * {@code GET /cards/{set}/{number}}; otherwise we fall back to
+     * {@code GET /cards/named?exact=<name>&set=<code>}. The resolved
+     * {@code collector_number} is also written back when it was empty.</p>
+     *
+     * @throws java.util.NoSuchElementException if no row with that id exists
+     * @throws IllegalStateException if the row lacks enough data to look up
+     *         (no name+set and no set+number), or Scryfall returns no card
+     * @throws ScryfallLookupException on network/API errors
+     */
+    @Transactional
+    public CollectionCard syncCard(Long id) {
+        CollectionCard existing = getById(id);
+
+        String setCode = existing.getSetCode();
+        String cardNumber = existing.getCardNumber();
+        String cardName = existing.getCardName();
+
+        ScryfallCard card;
+        if (isNotBlank(setCode) && isNotBlank(cardNumber)) {
+            card = cardLookupService.getCardBySetAndNumber(setCode, cardNumber);
+        } else if (isNotBlank(setCode) && isNotBlank(cardName)) {
+            card = cardLookupService.getCardByNameAndSet(cardName, setCode);
+        } else {
+            throw new IllegalStateException(
+                    "Linha id=" + id + " sem dados suficientes para sincronizar "
+                            + "(precisa de set + número, ou set + nome).");
+        }
+
+        if (card == null) {
+            throw new IllegalStateException(
+                    "Scryfall não retornou carta para id=" + id
+                            + " (name=" + cardName + ", set=" + setCode
+                            + ", number=" + cardNumber + ")");
+        }
+
+        if (card.getTypeLine() != null) {
+            existing.setCardType(card.getTypeLine());
+        }
+        BigDecimal price = priceFrom(card, existing.isFoil());
+        if (price != null) {
+            existing.setPrice(price);
+        }
+        if (isBlank(existing.getCardNumber()) && card.getCollectorNumber() != null) {
+            existing.setCardNumber(card.getCollectorNumber());
+        }
+
+        return repository.save(existing);
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static boolean isNotBlank(String s) {
+        return !isBlank(s);
+    }
+
+    private static BigDecimal priceFrom(ScryfallCard card, boolean foil) {
+        if (card == null || card.getPrices() == null) return null;
+        ScryfallPrices prices = card.getPrices();
+        String raw = foil ? prices.getUsdFoil() : prices.getUsd();
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return new BigDecimal(raw);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }
