@@ -130,6 +130,22 @@ export const api = {
   syncCard: (id: number) =>
     request<CollectionCard>(`/api/collection/cards/${id}/sync`, { method: 'POST' }),
 
+  // Collection data dumps (point-in-time snapshots of the collection)
+  createCollectionDump: () =>
+    request<{ data_dump_date_time: string }>('/api/collection/datadumps', {
+      method: 'POST',
+    }),
+  listCollectionDumps: () =>
+    request<string[]>('/api/collection/datadumps'),
+  listCardsFromDump: (timestamp: string) =>
+    request<CollectionCard[]>(
+      `/api/collection/datadumps/${encodeURIComponent(timestamp)}/cards`,
+    ),
+  deleteCollectionDump: (timestamp: string) =>
+    request<void>(`/api/collection/datadumps/${encodeURIComponent(timestamp)}`, {
+      method: 'DELETE',
+    }),
+
   // Collection import (async)
   importCollection: async (file: File): Promise<ImportJobSnapshot> => {
     const body = new FormData()

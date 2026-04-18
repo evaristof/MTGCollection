@@ -49,6 +49,24 @@ function extractErrorMessage(err: unknown): string {
   return raw
 }
 
+/**
+ * Formats an ISO-8601 local-datetime string (e.g. `2025-11-18T10:22:31`) as
+ * a human-friendly label for the data-dump combo. Invalid inputs fall back
+ * to the raw string so nothing ever becomes unselectable.
+ */
+function formatDumpLabel(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
 export default function CardsPage() {
   const [cards, setCards] = useState<CollectionCard[]>([])
   const [sets, setSets] = useState<MagicSet[]>([])
@@ -59,25 +77,48 @@ export default function CardsPage() {
   const [editing, setEditing] = useState<EditFormState | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [syncingId, setSyncingId] = useState<number | null>(null)
+  // Data-dump state. `dumpTimestamps` is the list rendered in the combo;
+  // `selectedDump === null` means "load the live collection", any other
+  // value means "load that snapshot". The grid is read-only while a dump
+  // is selected (editing/deleting/syncing only make sense on live rows).
+  const [dumpTimestamps, setDumpTimestamps] = useState<string[]>([])
+  const [selectedDump, setSelectedDump] = useState<string | null>(null)
+  const [dumpBusy, setDumpBusy] = useState(false)
+
+  const loadDumps = useCallback(async () => {
+    try {
+      const list = await api.listCollectionDumps()
+      setDumpTimestamps(list)
+      return list
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      return [] as string[]
+    }
+  }, [])
 
   const loadCards = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      // We now filter client-side (by every form field), so always fetch all.
-      const data = await api.listCards()
+      const data = selectedDump
+        ? await api.listCardsFromDump(selectedDump)
+        : await api.listCards()
       setCards(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [selectedDump])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCards()
   }, [loadCards])
+
+  useEffect(() => {
+    void loadDumps()
+  }, [loadDumps])
 
   useEffect(() => {
     // load sets for the dropdown — best-effort; not fatal if it fails
@@ -263,16 +304,96 @@ export default function CardsPage() {
     }
   }
 
+  const onCreateDump = async () => {
+    setDumpBusy(true)
+    setError(null)
+    try {
+      await api.createCollectionDump()
+      await loadDumps()
+    } catch (err) {
+      alert(`Falha ao gerar data dump:\n\n${extractErrorMessage(err)}`)
+    } finally {
+      setDumpBusy(false)
+    }
+  }
+
+  const onDeleteSelectedDump = async () => {
+    if (!selectedDump) return
+    if (!confirm(`Excluir o data dump de ${formatDumpLabel(selectedDump)}?\n\nEssa ação é irreversível.`)) return
+    setDumpBusy(true)
+    setError(null)
+    try {
+      await api.deleteCollectionDump(selectedDump)
+      // Back to "live collection" after deleting the viewed snapshot.
+      setSelectedDump(null)
+      await loadDumps()
+    } catch (err) {
+      alert(`Falha ao excluir data dump:\n\n${extractErrorMessage(err)}`)
+    } finally {
+      setDumpBusy(false)
+    }
+  }
+
+  // A dump is read-only history — never let the user mutate rows that
+  // reflect a past snapshot.
+  const viewingDump = selectedDump !== null
+
   return (
     <section className="page">
       <div className="toolbar">
-        <h2>Cartas da coleção {loading && <span className="muted">(carregando…)</span>}</h2>
+        <h2>
+          Cartas da coleção {loading && <span className="muted">(carregando…)</span>}
+          {viewingDump && (
+            <span className="muted"> — snapshot de {formatDumpLabel(selectedDump!)}</span>
+          )}
+        </h2>
         <div className="toolbar__actions">
           <button onClick={() => void loadCards()} disabled={loading}>
             Recarregar
           </button>
-          <button type="button" onClick={() => setImportOpen(true)}>
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            disabled={viewingDump}
+            title={viewingDump ? 'Selecione "— atual —" para importar' : undefined}
+          >
             Importar coleção…
+          </button>
+          <button
+            type="button"
+            onClick={() => void onCreateDump()}
+            disabled={dumpBusy || viewingDump}
+            title={
+              viewingDump
+                ? 'Selecione "— atual —" para gerar um novo dump'
+                : 'Gerar um snapshot da coleção atual'
+            }
+          >
+            {dumpBusy ? 'Gerando…' : 'Data Dump'}
+          </button>
+          <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span>Snapshot:</span>
+            <select
+              value={selectedDump ?? ''}
+              onChange={(e) => setSelectedDump(e.target.value === '' ? null : e.target.value)}
+              disabled={dumpBusy}
+            >
+              <option value="">— atual —</option>
+              {dumpTimestamps.map((ts) => (
+                <option key={ts} value={ts}>
+                  {formatDumpLabel(ts)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void onDeleteSelectedDump()}
+            disabled={!viewingDump || dumpBusy}
+            title={viewingDump ? 'Excluir o snapshot selecionado' : 'Selecione um snapshot para excluir'}
+          >
+            Excluir snapshot
           </button>
         </div>
       </div>
@@ -448,15 +569,32 @@ export default function CardsPage() {
                     <td>{c.comentario ?? '-'}</td>
                     <td>{c.localizacao ?? '-'}</td>
                     <td className="actions">
-                      <button type="button" onClick={() => onStartEdit(c)}>Editar</button>
-                      <button type="button" className="danger" onClick={() => void onDelete(c.id)}>
+                      <button
+                        type="button"
+                        onClick={() => onStartEdit(c)}
+                        disabled={viewingDump}
+                        title={viewingDump ? 'Snapshots são somente leitura' : undefined}
+                      >
+                        Editar
+                      </button>
+                      <button
+                        type="button"
+                        className="danger"
+                        onClick={() => void onDelete(c.id)}
+                        disabled={viewingDump}
+                        title={viewingDump ? 'Snapshots são somente leitura' : undefined}
+                      >
                         Deletar
                       </button>
                       <button
                         type="button"
                         onClick={() => void onSync(c.id)}
-                        disabled={syncingId === c.id}
-                        title="Buscar tipo e preço no Scryfall"
+                        disabled={syncingId === c.id || viewingDump}
+                        title={
+                          viewingDump
+                            ? 'Snapshots são somente leitura'
+                            : 'Buscar tipo e preço no Scryfall'
+                        }
                       >
                         {syncingId === c.id ? 'Sincronizando…' : 'Sincronizar'}
                       </button>
