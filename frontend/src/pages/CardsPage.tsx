@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type AddCardInput } from '../api/client'
 import type { CollectionCard, MagicSet } from '../types/mtg'
 import { useTableControls } from '../hooks/useTableControls'
@@ -84,6 +84,12 @@ export default function CardsPage() {
   const [dumpTimestamps, setDumpTimestamps] = useState<string[]>([])
   const [selectedDump, setSelectedDump] = useState<string | null>(null)
   const [dumpBusy, setDumpBusy] = useState(false)
+  // Seleção em lote (ids de `CollectionCard`). O checkbox do header é um
+  // master controlado pelo estado: checked quando todas as linhas visíveis
+  // estão selecionadas, indeterminate quando apenas parte está.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [batchBusy, setBatchBusy] = useState(false)
+  const masterCheckboxRef = useRef<HTMLInputElement>(null)
 
   const loadDumps = useCallback(async () => {
     try {
@@ -117,6 +123,7 @@ export default function CardsPage() {
   }, [loadCards])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDumps()
   }, [loadDumps])
 
@@ -279,6 +286,50 @@ export default function CardsPage() {
     return Number(c.price) * c.quantity
   }
 
+  // Mantém apenas ids que ainda estão visíveis após reload/filtro mudar.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const visible = new Set(filteredCards.map((c) => c.id))
+      let changed = false
+      const next = new Set<number>()
+      for (const id of prev) {
+        if (visible.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [filteredCards])
+
+  const allSelected =
+    filteredCards.length > 0 && selectedIds.size === filteredCards.length
+  const someSelected = selectedIds.size > 0 && !allSelected
+
+  // `indeterminate` só existe na DOM — mexemos via ref depois do render.
+  useEffect(() => {
+    if (masterCheckboxRef.current) {
+      masterCheckboxRef.current.indeterminate = someSelected
+    }
+  }, [someSelected])
+
+  const onToggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredCards.map((c) => c.id)))
+    }
+  }
+
+  const onToggleSelectOne = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const onDelete = async (id: number) => {
     if (!confirm(`Deletar a carta #${id}?`)) return
     setError(null)
@@ -301,6 +352,64 @@ export default function CardsPage() {
       alert(`Falha ao sincronizar carta #${id}:\n\n${extractErrorMessage(err)}`)
     } finally {
       setSyncingId(null)
+    }
+  }
+
+  const onBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    if (!confirm(`Deletar ${ids.length} carta(s) selecionada(s)?`)) return
+    setBatchBusy(true)
+    setError(null)
+    const failures: { id: number; err: unknown }[] = []
+    try {
+      for (const id of ids) {
+        try {
+          await api.deleteCard(id)
+        } catch (err) {
+          failures.push({ id, err })
+        }
+      }
+      setSelectedIds(new Set())
+      await loadCards()
+      if (failures.length) {
+        alert(
+          `Falha ao deletar ${failures.length} carta(s):\n\n` +
+            failures
+              .map((f) => `#${f.id}: ${extractErrorMessage(f.err)}`)
+              .join('\n'),
+        )
+      }
+    } finally {
+      setBatchBusy(false)
+    }
+  }
+
+  const onBatchSync = async () => {
+    if (selectedIds.size === 0) return
+    const ids = Array.from(selectedIds)
+    setBatchBusy(true)
+    setError(null)
+    const failures: { id: number; err: unknown }[] = []
+    try {
+      for (const id of ids) {
+        try {
+          const updated = await api.syncCard(id)
+          setCards((prev) => prev.map((c) => (c.id === id ? updated : c)))
+        } catch (err) {
+          failures.push({ id, err })
+        }
+      }
+      if (failures.length) {
+        alert(
+          `Falha ao sincronizar ${failures.length} carta(s):\n\n` +
+            failures
+              .map((f) => `#${f.id}: ${extractErrorMessage(f.err)}`)
+              .join('\n'),
+        )
+      }
+    } finally {
+      setBatchBusy(false)
     }
   }
 
@@ -350,6 +459,35 @@ export default function CardsPage() {
         <div className="toolbar__actions">
           <button onClick={() => void loadCards()} disabled={loading}>
             Recarregar
+          </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void onBatchDelete()}
+            disabled={selectedIds.size === 0 || batchBusy || viewingDump}
+            title={
+              viewingDump
+                ? 'Snapshots são somente leitura'
+                : selectedIds.size === 0
+                  ? 'Selecione pelo menos uma carta'
+                  : `Deletar ${selectedIds.size} carta(s) selecionada(s)`
+            }
+          >
+            {batchBusy ? 'Processando…' : `Deletar selecionados (${selectedIds.size})`}
+          </button>
+          <button
+            type="button"
+            onClick={() => void onBatchSync()}
+            disabled={selectedIds.size === 0 || batchBusy || viewingDump}
+            title={
+              viewingDump
+                ? 'Snapshots são somente leitura'
+                : selectedIds.size === 0
+                  ? 'Selecione pelo menos uma carta'
+                  : `Sincronizar ${selectedIds.size} carta(s) selecionada(s) no Scryfall`
+            }
+          >
+            {batchBusy ? 'Processando…' : `Sincronizar selecionados (${selectedIds.size})`}
           </button>
           <button
             type="button"
@@ -538,6 +676,23 @@ export default function CardsPage() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 32 }}>
+                    <input
+                      ref={masterCheckboxRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleSelectAll}
+                      disabled={viewingDump || filteredCards.length === 0}
+                      aria-label="Selecionar todas as cartas visíveis"
+                      title={
+                        viewingDump
+                          ? 'Snapshots são somente leitura'
+                          : allSelected
+                            ? 'Desmarcar todas'
+                            : 'Marcar todas as cartas visíveis'
+                      }
+                    />
+                  </th>
                   <SortableTh<CollectionCard> label="#" field="id" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <SortableTh<CollectionCard> label="Nº" field="card_number" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <SortableTh<CollectionCard> label="Nome" field="card_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
@@ -556,6 +711,15 @@ export default function CardsPage() {
               <tbody>
                 {pageRows.map((c) => (
                   <tr key={c.id}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(c.id)}
+                        onChange={() => onToggleSelectOne(c.id)}
+                        disabled={viewingDump}
+                        aria-label={`Selecionar carta #${c.id}`}
+                      />
+                    </td>
                     <td>{c.id}</td>
                     <td>{c.card_number}</td>
                     <td>{c.card_name}</td>
