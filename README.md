@@ -17,10 +17,19 @@ Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Bo
 - React Router DOM
 - CSS minimalista (sem libs de UI — podemos trocar por Mantine/Chakra depois)
 
+## Estrutura do repositório
+
+```
+.
+├── backend/     # Spring Boot (pom.xml + src/)
+└── frontend/    # React + Vite + TypeScript
+```
+
 ## Como rodar
 
 ```bash
 # backend
+cd backend
 mvn spring-boot:run
 
 # frontend (em outro terminal)
@@ -81,8 +90,8 @@ O `-U` força o Maven a tentar baixar as dependências que falharam antes.
 ## Como testar
 
 ```bash
-mvn test        # back-end
-cd frontend && npm run lint && npm run build
+cd backend && mvn test                         # back-end
+cd frontend && npm run lint && npm run build   # front-end
 ```
 
 ## Endpoints
