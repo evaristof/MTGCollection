@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type AddCardInput } from '../api/client'
 import type { CollectionCard, MagicSet } from '../types/mtg'
+import { useTableControls } from '../hooks/useTableControls'
+import { SortableTh } from '../components/SortableTh'
+import { PaginationBar } from '../components/PaginationBar'
 
 type AddFormState = AddCardInput
 type EditFormState = {
@@ -66,6 +69,23 @@ export default function CardsPage() {
         .map((s) => ({ code: s.set_code, label: `${s.set_code} — ${s.set_name}` })),
     [sets],
   )
+
+  const {
+    pageRows,
+    totalCount,
+    pageCount,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    sortKey,
+    sortDirection,
+    toggleSort,
+  } = useTableControls<CollectionCard>({
+    rows: cards,
+    initialSortKey: 'card_name',
+    resetKey: filterSet,
+  })
 
   const onAdd = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -289,48 +309,58 @@ export default function CardsPage() {
         </form>
       )}
 
-      {cards.length === 0 && !loading && (
+      {totalCount === 0 && !loading && (
         <p className="muted">Nenhuma carta encontrada. Adicione a primeira no formulário acima.</p>
       )}
 
-      {cards.length > 0 && (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Nº</th>
-                <th>Nome</th>
-                <th>Set</th>
-                <th>Tipo</th>
-                <th>Foil</th>
-                <th>Lang</th>
-                <th>Qtd</th>
-                <th style={{ width: 160 }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cards.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.id}</td>
-                  <td>{c.card_number}</td>
-                  <td>{c.card_name}</td>
-                  <td><code>{c.set_code}</code></td>
-                  <td>{c.card_type ?? '-'}</td>
-                  <td>{c.foil ? '✦' : '—'}</td>
-                  <td>{c.language}</td>
-                  <td>{c.quantity}</td>
-                  <td className="actions">
-                    <button type="button" onClick={() => onStartEdit(c)}>Editar</button>
-                    <button type="button" className="danger" onClick={() => void onDelete(c.id)}>
-                      Deletar
-                    </button>
-                  </td>
+      {totalCount > 0 && (
+        <>
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <SortableTh<CollectionCard> label="#" field="id" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Nº" field="card_number" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Nome" field="card_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Set" field="set_code" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Tipo" field="card_type" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Foil" field="foil" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Lang" field="language" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Qtd" field="quantity" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <th style={{ width: 160 }}>Ações</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pageRows.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.id}</td>
+                    <td>{c.card_number}</td>
+                    <td>{c.card_name}</td>
+                    <td><code>{c.set_code}</code></td>
+                    <td>{c.card_type ?? '-'}</td>
+                    <td>{c.foil ? '✦' : '—'}</td>
+                    <td>{c.language}</td>
+                    <td>{c.quantity}</td>
+                    <td className="actions">
+                      <button type="button" onClick={() => onStartEdit(c)}>Editar</button>
+                      <button type="button" className="danger" onClick={() => void onDelete(c.id)}>
+                        Deletar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <PaginationBar
+            page={page}
+            pageCount={pageCount}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
       )}
     </section>
   )
