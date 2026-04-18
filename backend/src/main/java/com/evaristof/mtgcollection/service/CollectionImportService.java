@@ -19,6 +19,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -80,13 +81,16 @@ public class CollectionImportService {
     private final CardLookupService cardLookupService;
     private final CollectionCardRepository cardRepository;
     private final MagicSetRepository setRepository;
+    private final SetPersistenceService setPersistenceService;
 
     public CollectionImportService(CardLookupService cardLookupService,
                                    CollectionCardRepository cardRepository,
-                                   MagicSetRepository setRepository) {
+                                   MagicSetRepository setRepository,
+                                   SetPersistenceService setPersistenceService) {
         this.cardLookupService = cardLookupService;
         this.cardRepository = cardRepository;
         this.setRepository = setRepository;
+        this.setPersistenceService = setPersistenceService;
     }
 
     /**
@@ -96,6 +100,19 @@ public class CollectionImportService {
      */
     public void runImport(ImportJob job, byte[] xlsxBytes) {
         Map<String, MagicSet> setsByName = indexSetsByName();
+        if (setsByName.isEmpty()) {
+            log.warn("Magic set table is empty — attempting to sync from Scryfall before import");
+            try {
+                setPersistenceService.syncSetsFromScryfall();
+                setsByName = indexSetsByName();
+            } catch (RuntimeException e) {
+                log.warn("Auto-sync of sets failed: {}", e.getMessage());
+                job.addError("Não foi possível sincronizar os sets automaticamente: " + e.getMessage()
+                        + ". As linhas ser\u00e3o gravadas sem set_code resolvido.");
+            }
+        }
+
+        List<UnresolvedRow> unresolved = new ArrayList<>();
 
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsxBytes))) {
             job.setTotal(countImportableRows(workbook));
@@ -107,8 +124,10 @@ public class CollectionImportService {
                     continue;
                 }
                 job.setCurrentSheet(sheet.getSheetName());
-                processSheet(sheet, setsByName, job);
+                processSheet(sheet, setsByName, job, unresolved);
             }
+
+            appendUnresolvedSheet(workbook, unresolved);
 
             try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 workbook.write(out);
@@ -161,7 +180,10 @@ public class CollectionImportService {
         return !isBlank(card) || !isBlank(set);
     }
 
-    private void processSheet(Sheet sheet, Map<String, MagicSet> setsByName, ImportJob job) {
+    private void processSheet(Sheet sheet,
+                              Map<String, MagicSet> setsByName,
+                              ImportJob job,
+                              List<UnresolvedRow> unresolved) {
         for (int r = FIRST_DATA_ROW; r <= sheet.getLastRowNum(); r++) {
             Row row = sheet.getRow(r);
             if (row == null) continue;
@@ -169,7 +191,7 @@ public class CollectionImportService {
 
             String rowRef = sheet.getSheetName() + "!" + (r + 1);
             try {
-                processRow(row, rowRef, setsByName, job);
+                processRow(sheet, row, r, rowRef, setsByName, job, unresolved);
             } catch (RuntimeException e) {
                 log.warn("Erro processando {}: {}", rowRef, e.getMessage());
                 job.addError(rowRef + ": " + e.getMessage());
@@ -179,7 +201,13 @@ public class CollectionImportService {
         }
     }
 
-    private void processRow(Row row, String rowRef, Map<String, MagicSet> setsByName, ImportJob job) {
+    private void processRow(Sheet sheet,
+                            Row row,
+                            int rowIndex,
+                            String rowRef,
+                            Map<String, MagicSet> setsByName,
+                            ImportJob job,
+                            List<UnresolvedRow> unresolved) {
         String number = readString(row.getCell(COL_NUMBER));
         String cardName = readString(row.getCell(COL_CARD));
         String setName = readString(row.getCell(COL_SET));
@@ -201,25 +229,46 @@ public class CollectionImportService {
         BigDecimal price = null;
 
         if (manualOverride) {
-            // Preserve whatever the user already typed in E/G on the sheet.
+            // For manual overrides we must preserve the user's existing E/G
+            // values (often formulas) in the spreadsheet. Read the cached
+            // results for DB persistence but leave the cells untouched.
             cardType = readString(row.getCell(COL_TYPE));
-        } else if (setCode == null) {
-            throw new IllegalStateException(
-                    "Set não encontrado no banco: '" + setName + "'. Sincronize os sets e tente novamente.");
+            price = readBigDecimal(row.getCell(COL_PRICE));
         } else {
-            ScryfallCard scryfallCard = lookupCard(cardName, number, setCode, rowRef);
-            if (scryfallCard != null) {
-                cardType = scryfallCard.getTypeLine();
-                if (cardNumber == null || cardNumber.isBlank()) {
-                    cardNumber = scryfallCard.getCollectorNumber();
+            String unresolvedReason = null;
+            if (setCode == null) {
+                unresolvedReason = "set '" + setName + "' não encontrado na base de sets";
+                job.addError(rowRef + ": " + unresolvedReason
+                        + " — linha gravada sem preço (sincronize os sets para enriquecer).");
+            } else {
+                try {
+                    ScryfallCard scryfallCard = lookupCard(cardName, number, setCode, rowRef);
+                    if (scryfallCard != null) {
+                        cardType = scryfallCard.getTypeLine();
+                        if (cardNumber == null || cardNumber.isBlank()) {
+                            cardNumber = scryfallCard.getCollectorNumber();
+                        }
+                        price = priceFrom(scryfallCard, foil);
+                    } else {
+                        unresolvedReason = "Scryfall retornou resposta vazia";
+                    }
+                } catch (RuntimeException e) {
+                    unresolvedReason = "Scryfall falhou: " + e.getMessage();
+                    job.addError(rowRef + ": " + unresolvedReason + " — linha gravada sem preço.");
                 }
-                price = priceFrom(scryfallCard, foil);
+                throttle();
             }
-            throttle();
-        }
+            // Only overwrite the cells when we actually resolved a value,
+            // so rows whose lookup failed keep whatever the user had there.
+            if (cardType != null) writeCellString(row, COL_TYPE, cardType);
+            if (price != null) writeCellNumeric(row, COL_PRICE, price);
 
-        writeCellString(row, COL_TYPE, cardType);
-        writeCellNumeric(row, COL_PRICE, price);
+            if (unresolvedReason != null) {
+                unresolved.add(new UnresolvedRow(
+                        sheet.getSheetName(), rowIndex + 1,
+                        number, cardName, setName, foilText, unresolvedReason));
+            }
+        }
 
         persist(rowRef, cardName, setCode, setName, foil, quantity, cardType,
                 cardNumber, price, comentario, language, localizacao, job);
@@ -268,21 +317,18 @@ public class CollectionImportService {
             job.addError(rowRef + ": nome da carta vazio, não gravado no banco");
             return;
         }
-        if (setCode == null || setCode.isBlank()) {
-            job.addError(rowRef + ": set '" + setName + "' não encontrado, não gravado no banco");
-            return;
-        }
 
         CollectionCard entity = new CollectionCard();
         entity.setCardName(cardName);
         entity.setSetCode(setCode);
+        entity.setSetNameRaw(setName);
         entity.setFoil(foil);
         entity.setQuantity(Math.max(quantity, 1));
         entity.setCardType(cardType);
-        entity.setCardNumber(cardNumber == null || cardNumber.isBlank() ? "" : cardNumber);
+        entity.setCardNumber(cardNumber == null || cardNumber.isBlank() ? null : cardNumber);
         entity.setPrice(price);
         entity.setComentario(comentario);
-        entity.setLanguage(language == null || language.isBlank() ? "English" : language);
+        entity.setLanguage(language == null || language.isBlank() ? null : language);
         entity.setLocalizacao(localizacao);
         cardRepository.save(entity);
         job.incrementPersisted();
@@ -315,6 +361,29 @@ public class CollectionImportService {
             return Long.toString((long) v);
         }
         return Double.toString(v);
+    }
+
+    private BigDecimal readBigDecimal(Cell cell) {
+        if (cell == null) return null;
+        try {
+            switch (cell.getCellType()) {
+                case NUMERIC -> { return BigDecimal.valueOf(cell.getNumericCellValue()); }
+                case STRING -> {
+                    String s = cell.getStringCellValue();
+                    if (s == null || s.isBlank()) return null;
+                    return new BigDecimal(s.trim());
+                }
+                case FORMULA -> {
+                    if (cell.getCachedFormulaResultType() == CellType.NUMERIC) {
+                        return BigDecimal.valueOf(cell.getNumericCellValue());
+                    }
+                }
+                default -> { return null; }
+            }
+        } catch (NumberFormatException | IllegalStateException e) {
+            return null;
+        }
+        return null;
     }
 
     private int readQuantity(Cell cell) {
@@ -384,5 +453,53 @@ public class CollectionImportService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Appends a "Não encontradas" sheet to the output workbook summarising
+     * every data row whose Scryfall lookup failed or whose set could not be
+     * resolved in the local MagicSet table. The sheet is only created when
+     * at least one unresolved row exists.
+     */
+    private void appendUnresolvedSheet(XSSFWorkbook workbook, List<UnresolvedRow> unresolved) {
+        if (unresolved.isEmpty()) return;
+
+        String name = "Não encontradas";
+        int suffix = 1;
+        while (workbook.getSheet(name) != null) {
+            name = "Não encontradas (" + (++suffix) + ")";
+        }
+        Sheet sheet = workbook.createSheet(name);
+
+        String[] headers = {"Aba", "Linha", "Number", "Card", "Set", "Foil", "Motivo"};
+        Row headerRow = sheet.createRow(0);
+        for (int i = 0; i < headers.length; i++) {
+            headerRow.createCell(i, CellType.STRING).setCellValue(headers[i]);
+        }
+
+        int r = 1;
+        for (UnresolvedRow u : unresolved) {
+            Row row = sheet.createRow(r++);
+            row.createCell(0, CellType.STRING).setCellValue(u.sheet());
+            row.createCell(1, CellType.NUMERIC).setCellValue(u.row());
+            row.createCell(2, CellType.STRING).setCellValue(u.number() == null ? "" : u.number());
+            row.createCell(3, CellType.STRING).setCellValue(u.card() == null ? "" : u.card());
+            row.createCell(4, CellType.STRING).setCellValue(u.set() == null ? "" : u.set());
+            row.createCell(5, CellType.STRING).setCellValue(u.foil() == null ? "" : u.foil());
+            row.createCell(6, CellType.STRING).setCellValue(u.reason() == null ? "" : u.reason());
+        }
+
+        for (int i = 0; i < headers.length; i++) {
+            sheet.autoSizeColumn(i);
+        }
+    }
+
+    private record UnresolvedRow(String sheet,
+                                 int row,
+                                 String number,
+                                 String card,
+                                 String set,
+                                 String foil,
+                                 String reason) {
     }
 }
