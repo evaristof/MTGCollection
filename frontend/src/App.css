@@ -1,15 +1,16 @@
 :root {
-  --bg: #0d1117;
-  --bg-alt: #161b22;
-  --bg-raised: #1f2430;
-  --border: #30363d;
-  --border-strong: #444c56;
-  --fg: #f5f7fa;
-  --fg-soft: #d0d7de;
-  --muted: #a8b0bd;
-  --accent: #7dadff;
-  --accent-strong: #a6c6ff;
-  --danger: #ff8080;
+  /* Dark slate palette — softer than pure black for long reading sessions. */
+  --bg: #1b1f27;
+  --bg-alt: #232834;
+  --bg-raised: #2a3040;
+  --border: #374052;
+  --border-strong: #48526a;
+  --fg: #e8edf5;
+  --fg-soft: #c0c8d6;
+  --muted: #8b94a7;
+  --accent: #7c9cff;
+  --accent-strong: #9fb6ff;
+  --danger: #ff8a8a;
   --sidebar-width: 230px;
   --sidebar-width-collapsed: 64px;
 }
@@ -243,14 +244,14 @@ button:hover:not(:disabled) {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0d1117;
+  color: #111624;
   font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
-  color: #0d1117;
+  color: #111624;
 }
 
 button:disabled {
