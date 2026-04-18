@@ -4,6 +4,7 @@ import type { CollectionCard, MagicSet } from '../types/mtg'
 import { useTableControls } from '../hooks/useTableControls'
 import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
+import { SetCombo } from '../components/SetCombo'
 
 type AddFormState = AddCardInput
 type EditFormState = {
@@ -65,8 +66,10 @@ export default function CardsPage() {
     () =>
       sets
         .slice()
-        .sort((a, b) => a.set_code.localeCompare(b.set_code))
-        .map((s) => ({ code: s.set_code, label: `${s.set_code} — ${s.set_name}` })),
+        .sort((a, b) =>
+          a.set_name.localeCompare(b.set_name, undefined, { sensitivity: 'base' }),
+        )
+        .map((s) => ({ code: s.set_code, name: s.set_name })),
     [sets],
   )
 
@@ -165,17 +168,16 @@ export default function CardsPage() {
       <div className="toolbar">
         <h2>Cartas da coleção {loading && <span className="muted">(carregando…)</span>}</h2>
         <div className="toolbar__actions">
-          <label className="inline">
+          <label className="inline" htmlFor="filter-set">
             Filtrar por set:&nbsp;
-            <select value={filterSet} onChange={(e) => setFilterSet(e.target.value)}>
-              <option value="">— todos —</option>
-              {setOptions.map((o) => (
-                <option key={o.code} value={o.code}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
           </label>
+          <SetCombo
+            id="filter-set"
+            value={filterSet}
+            onChange={setFilterSet}
+            options={setOptions}
+            emptyLabel="— todos —"
+          />
           <button onClick={() => void loadCards()} disabled={loading}>
             Recarregar
           </button>
@@ -212,7 +214,7 @@ export default function CardsPage() {
             <datalist id="set-options">
               {setOptions.map((o) => (
                 <option key={o.code} value={o.code}>
-                  {o.label}
+                  {o.name} — {o.code}
                 </option>
               ))}
             </datalist>
