@@ -2,8 +2,9 @@
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, sans-serif;
   line-height: 1.5;
-  color: #222;
-  background-color: #fff;
+  color: #f5f7fa;
+  background-color: #0d1117;
+  color-scheme: dark;
 }
 
 * {
