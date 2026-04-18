@@ -35,9 +35,14 @@ public class CardLookupService {
             throw new IllegalArgumentException("setCode must not be blank");
         }
 
-        String path = "/cards/named?exact=" + URLEncoder.encode(cardName, StandardCharsets.UTF_8)
-                + "&set=" + URLEncoder.encode(setCode, StandardCharsets.UTF_8);
+        String path = urlByNameAndSet(cardName, setCode);
         return fetch(path);
+    }
+
+    /** Builds the Scryfall path (relative to base URL) for a name+set lookup. */
+    public String urlByNameAndSet(String cardName, String setCode) {
+        return "/cards/named?exact=" + URLEncoder.encode(cardName, StandardCharsets.UTF_8)
+                + "&set=" + URLEncoder.encode(setCode, StandardCharsets.UTF_8);
     }
 
     /**
@@ -53,20 +58,34 @@ public class CardLookupService {
             throw new IllegalArgumentException("collectorNumber must not be blank");
         }
 
-        String path = "/cards/" + URLEncoder.encode(setCode, StandardCharsets.UTF_8)
-                + "/" + URLEncoder.encode(collectorNumber, StandardCharsets.UTF_8);
+        String path = urlBySetAndNumber(setCode, collectorNumber);
         return fetch(path);
     }
 
+    /** Builds the Scryfall path (relative to base URL) for a set+collector-number lookup. */
+    public String urlBySetAndNumber(String setCode, String collectorNumber) {
+        return "/cards/" + URLEncoder.encode(setCode, StandardCharsets.UTF_8)
+                + "/" + URLEncoder.encode(collectorNumber, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Resolves a Scryfall path to a fully-qualified URL (using the http
+     * client's configured base URL).
+     */
+    public String absoluteUrl(String path) {
+        return httpClient.getBaseUrl() + path;
+    }
+
     private ScryfallCard fetch(String path) {
+        String fullUrl = absoluteUrl(path);
         try {
             String body = httpClient.get(path);
             return gson.fromJson(body, ScryfallCard.class);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Scryfall request was interrupted", e);
+            throw new ScryfallLookupException(fullUrl, "Scryfall request was interrupted", e);
         } catch (IOException e) {
-            throw new IllegalStateException("Failed to fetch card from Scryfall", e);
+            throw new ScryfallLookupException(fullUrl, e.getMessage(), e);
         }
     }
 }

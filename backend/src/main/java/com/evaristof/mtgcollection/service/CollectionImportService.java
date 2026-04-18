@@ -238,11 +238,13 @@ public class CollectionImportService {
             price = readBigDecimal(row.getCell(COL_PRICE));
         } else {
             String unresolvedReason = null;
+            String attemptedUrl = null;
             if (setCode == null) {
                 unresolvedReason = "set '" + setName + "' não encontrado na base de sets";
                 job.addError(rowRef + ": " + unresolvedReason
                         + " — linha gravada sem preço (sincronize os sets para enriquecer).");
             } else {
+                attemptedUrl = expectedLookupUrl(cardName, number, setCode);
                 try {
                     ScryfallCard scryfallCard = lookupCard(cardName, number, setCode, rowRef);
                     if (scryfallCard != null) {
@@ -254,6 +256,10 @@ public class CollectionImportService {
                     } else {
                         unresolvedReason = "Scryfall retornou resposta vazia";
                     }
+                } catch (ScryfallLookupException e) {
+                    if (e.getUrl() != null) attemptedUrl = e.getUrl();
+                    unresolvedReason = "Scryfall falhou: " + e.getMessage();
+                    job.addError(rowRef + ": " + unresolvedReason + " — linha gravada sem preço.");
                 } catch (RuntimeException e) {
                     unresolvedReason = "Scryfall falhou: " + e.getMessage();
                     job.addError(rowRef + ": " + unresolvedReason + " — linha gravada sem preço.");
@@ -268,7 +274,7 @@ public class CollectionImportService {
             if (unresolvedReason != null) {
                 unresolved.add(new UnresolvedRow(
                         sheet.getSheetName(), rowIndex + 1,
-                        number, cardName, setName, foilText, unresolvedReason));
+                        number, cardName, setName, foilText, unresolvedReason, attemptedUrl));
             }
         }
 
@@ -288,6 +294,22 @@ public class CollectionImportService {
             throw new IllegalArgumentException("Linha sem nome de carta nem número");
         }
         return cardLookupService.getCardByNameAndSet(cardName, setCode);
+    }
+
+    /**
+     * Computes the URL that {@link #lookupCard} will attempt last. Matches the
+     * fallback logic: if a collector number is present we try that endpoint
+     * first, but the final attempt (and thus the most useful URL to surface
+     * when the lookup fails) is name+set unless the name is blank.
+     */
+    private String expectedLookupUrl(String cardName, String number, String setCode) {
+        if (cardName != null && !cardName.isBlank()) {
+            return cardLookupService.absoluteUrl(cardLookupService.urlByNameAndSet(cardName, setCode));
+        }
+        if (number != null && !number.isBlank()) {
+            return cardLookupService.absoluteUrl(cardLookupService.urlBySetAndNumber(setCode, number));
+        }
+        return null;
     }
 
     private BigDecimal priceFrom(ScryfallCard card, boolean foil) {
@@ -473,7 +495,7 @@ public class CollectionImportService {
         }
         Sheet sheet = workbook.createSheet(name);
 
-        String[] headers = {"Aba", "Linha", "Number", "Card", "Set", "Foil", "Motivo"};
+        String[] headers = {"Aba", "Linha", "Number", "Card", "Set", "Foil", "Motivo", "URL"};
         Row headerRow = sheet.createRow(0);
         for (int i = 0; i < headers.length; i++) {
             headerRow.createCell(i, CellType.STRING).setCellValue(headers[i]);
@@ -489,6 +511,7 @@ public class CollectionImportService {
             row.createCell(4, CellType.STRING).setCellValue(u.set() == null ? "" : u.set());
             row.createCell(5, CellType.STRING).setCellValue(u.foil() == null ? "" : u.foil());
             row.createCell(6, CellType.STRING).setCellValue(u.reason() == null ? "" : u.reason());
+            row.createCell(7, CellType.STRING).setCellValue(u.url() == null ? "" : u.url());
         }
 
         for (int i = 0; i < headers.length; i++) {
@@ -502,6 +525,7 @@ public class CollectionImportService {
                                  String card,
                                  String set,
                                  String foil,
-                                 String reason) {
+                                 String reason,
+                                 String url) {
     }
 }
