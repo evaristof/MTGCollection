@@ -79,11 +79,11 @@ class CardLookupServiceTest {
     }
 
     @Test
-    void getCardByNameAndSet_httpFailureWrappedAsIllegalState() throws Exception {
+    void getCardByNameAndSet_httpFailureWrappedAsScryfallLookupException() throws Exception {
         when(httpClient.get(anyString())).thenThrow(new java.io.IOException("boom"));
 
         assertThatThrownBy(() -> service.getCardByNameAndSet("x", "neo"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Failed to fetch card");
+                .isInstanceOf(ScryfallLookupException.class)
+                .hasMessageContaining("boom");
     }
 }
