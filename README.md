@@ -42,19 +42,24 @@ A aplicação Java sobe em `http://localhost:8080`. O console H2 fica em `http:/
 
 Em produção do front, defina `VITE_API_BASE_URL` apontando para a URL absoluta do backend.
 
-## Troubleshooting — `Cannot assign requested address: getsockopt` no Maven
+## Troubleshooting — `Cannot assign requested address: getsockopt`
 
-Em algumas máquinas (principalmente Windows) o Maven falha ao baixar dependências com:
+Em algumas máquinas (principalmente Windows) o JVM falha ao abrir sockets TCP com:
 
 ```
-FATAL ... Non-resolvable parent POM ...
-Could not transfer artifact ... from/to central (https://repo.maven.apache.org/maven2):
 Cannot assign requested address: getsockopt
 ```
 
-É sintoma de IPv6 quebrado na conexão. Resolve forçando o JVM a usar IPv4 via a variável de ambiente `MAVEN_OPTS`.
+É sintoma de IPv6 quebrado. Aparece em dois momentos diferentes:
 
-### Windows
+1. **Durante `mvn …`** (resolvendo dependências) — resolve via `MAVEN_OPTS` (ver abaixo).
+2. **Durante a aplicação rodando** (ex.: ao clicar "Sincronizar do Scryfall") — a aplicação já força IPv4 no `main()` e no plugin `spring-boot-maven-plugin`, então `mvn spring-boot:run` e `java -jar target/…` já sobem com IPv4. Se você rodar pela **IDE** (IntelliJ / Eclipse), adicione os mesmos flags em *VM options* da Run Configuration:
+   ```
+   -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true
+   ```
+   No IntelliJ: `Run → Edit Configurations… → MtgCollectionApplication → VM options`.
+
+### `MAVEN_OPTS` (para builds no Windows)
 
 **Via GUI (Variáveis de Ambiente):**
 1. Menu Iniciar → *"Editar as variáveis de ambiente do sistema"*
@@ -72,7 +77,7 @@ setx MAVEN_OPTS "-Djava.net.preferIPv4Stack=true"
 
 > `MAVEN_OPTS` não precisa ir no `PATH` — são variáveis independentes. Se você já tem um `MAVEN_OPTS` (ex.: `-Xmx2g`), concatene: `-Xmx2g -Djava.net.preferIPv4Stack=true`.
 
-### Linux / macOS
+### `MAVEN_OPTS` (Linux / macOS)
 
 ```bash
 export MAVEN_OPTS="-Djava.net.preferIPv4Stack=true"
