@@ -75,6 +75,17 @@ export default function CardsPage() {
     [sets],
   )
 
+  const setNameByCode = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of sets) m.set(s.set_code, s.set_name)
+    return m
+  }, [sets])
+
+  const getSetName = useCallback(
+    (code: string) => setNameByCode.get(code) ?? code,
+    [setNameByCode],
+  )
+
   const {
     pageRows,
     totalCount,
@@ -90,6 +101,14 @@ export default function CardsPage() {
     rows: cards,
     initialSortKey: 'card_name',
     resetKey: filterSet,
+    comparators: {
+      // Sort the "Set" column by the resolved set name (fallback to code).
+      set_code: (a, b) =>
+        getSetName(a.set_code).localeCompare(getSetName(b.set_code), undefined, {
+          numeric: true,
+          sensitivity: 'base',
+        }),
+    },
   })
 
   const onAdd = async (e: React.FormEvent) => {
@@ -362,7 +381,7 @@ export default function CardsPage() {
                     <td>{c.id}</td>
                     <td>{c.card_number}</td>
                     <td>{c.card_name}</td>
-                    <td><code>{c.set_code}</code></td>
+                    <td title={c.set_code}>{getSetName(c.set_code)}</td>
                     <td>{c.card_type ?? '-'}</td>
                     <td>{c.foil ? '✦' : '—'}</td>
                     <td>{c.language}</td>

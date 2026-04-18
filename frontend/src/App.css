@@ -388,6 +388,11 @@ code {
 .actions {
   display: flex;
   gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.actions button {
+  white-space: nowrap;
 }
 
 label.inline {
