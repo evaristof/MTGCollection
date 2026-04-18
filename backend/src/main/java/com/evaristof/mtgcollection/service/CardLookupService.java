@@ -37,6 +37,28 @@ public class CardLookupService {
 
         String path = "/cards/named?exact=" + URLEncoder.encode(cardName, StandardCharsets.UTF_8)
                 + "&set=" + URLEncoder.encode(setCode, StandardCharsets.UTF_8);
+        return fetch(path);
+    }
+
+    /**
+     * Fetches the card identified by the ({@code setCode}, {@code collectorNumber})
+     * pair. Uses the {@code GET /cards/{set}/{number}} Scryfall endpoint, which
+     * returns the same {@link ScryfallCard} shape as the name-based lookup.
+     */
+    public ScryfallCard getCardBySetAndNumber(String setCode, String collectorNumber) {
+        if (setCode == null || setCode.isBlank()) {
+            throw new IllegalArgumentException("setCode must not be blank");
+        }
+        if (collectorNumber == null || collectorNumber.isBlank()) {
+            throw new IllegalArgumentException("collectorNumber must not be blank");
+        }
+
+        String path = "/cards/" + URLEncoder.encode(setCode, StandardCharsets.UTF_8)
+                + "/" + URLEncoder.encode(collectorNumber, StandardCharsets.UTF_8);
+        return fetch(path);
+    }
+
+    private ScryfallCard fetch(String path) {
         try {
             String body = httpClient.get(path);
             return gson.fromJson(body, ScryfallCard.class);

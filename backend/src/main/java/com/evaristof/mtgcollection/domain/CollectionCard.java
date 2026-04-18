@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.math.BigDecimal;
 import java.util.Objects;
 
 /**
@@ -41,11 +42,20 @@ public class CollectionCard {
     @Column(name = "CARD_TYPE")
     private String cardType;
 
-    @Column(name = "LANGUAGE", nullable = false, length = 16)
+    @Column(name = "LANGUAGE", length = 32)
     private String language;
 
     @Column(name = "QUANTITY", nullable = false)
     private int quantity;
+
+    @Column(name = "PRICE", precision = 12, scale = 2)
+    private BigDecimal price;
+
+    @Column(name = "COMENTARIO", length = 1024)
+    private String comentario;
+
+    @Column(name = "LOCALIZACAO", length = 255)
+    private String localizacao;
 
     public CollectionCard() {
     }
@@ -112,6 +122,30 @@ public class CollectionCard {
 
     public void setQuantity(int quantity) {
         this.quantity = quantity;
+    }
+
+    public BigDecimal getPrice() {
+        return price;
+    }
+
+    public void setPrice(BigDecimal price) {
+        this.price = price;
+    }
+
+    public String getComentario() {
+        return comentario;
+    }
+
+    public void setComentario(String comentario) {
+        this.comentario = comentario;
+    }
+
+    public String getLocalizacao() {
+        return localizacao;
+    }
+
+    public void setLocalizacao(String localizacao) {
+        this.localizacao = localizacao;
     }
 
     @Override

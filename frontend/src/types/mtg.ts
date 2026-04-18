@@ -42,6 +42,27 @@ export interface CollectionCard {
   card_type?: string | null
   language: string
   quantity: number
+  price?: number | null
+  comentario?: string | null
+  localizacao?: string | null
+}
+
+/**
+ * Snapshot of an async collection-import job.
+ * Returned by POST /api/collection/import and
+ * GET /api/collection/import/{id}/status.
+ */
+export interface ImportJobSnapshot {
+  id: string
+  file_name: string | null
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED'
+  total: number
+  processed: number
+  persisted: number
+  errors: string[]
+  current_sheet: string | null
+  result_file_name: string | null
+  error_message: string | null
 }
 
 /**
