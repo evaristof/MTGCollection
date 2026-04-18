@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type SetInput } from '../api/client'
 import type { MagicSet } from '../types/mtg'
+import { useTableControls } from '../hooks/useTableControls'
+import { SortableTh } from '../components/SortableTh'
+import { PaginationBar } from '../components/PaginationBar'
 
 type FormState = SetInput & { _editingCode?: string | null }
 
@@ -81,6 +84,23 @@ export default function SetsPage() {
         (s.block_name ?? '').toLowerCase().includes(q),
     )
   }, [sets, filter])
+
+  const {
+    pageRows,
+    totalCount,
+    pageCount,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    sortKey,
+    sortDirection,
+    toggleSort,
+  } = useTableControls<MagicSet>({
+    rows: filteredSets,
+    initialSortKey: 'set_code',
+    resetKey: filter,
+  })
 
   const onSync = async () => {
     setSyncing(true)
@@ -249,46 +269,60 @@ export default function SetsPage() {
         </div>
       </form>
 
-      {filteredSets.length === 0 && !loading && (
+      {totalCount === 0 && !loading && (
         <p className="muted">
           Nenhum set encontrado. Use “Sincronizar do Scryfall” ou crie um manualmente no formulário acima.
         </p>
       )}
 
-      {filteredSets.length > 0 && (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Released</th>
-                <th>Type</th>
-                <th>Cards</th>
-                <th>Block</th>
-                <th style={{ width: 160 }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSets.map((s) => (
-                <tr key={s.set_code}>
-                  <td><code>{s.set_code}</code></td>
-                  <td>{s.set_name}</td>
-                  <td>{s.release_date ?? '-'}</td>
-                  <td>{s.set_type ?? '-'}</td>
-                  <td>{s.card_count ?? '-'}</td>
-                  <td>{s.block_name ?? '-'}</td>
-                  <td className="actions">
-                    <button type="button" onClick={() => onEdit(s)}>Editar</button>
-                    <button type="button" className="danger" onClick={() => void onDelete(s.set_code)}>
-                      Deletar
-                    </button>
-                  </td>
+      {totalCount > 0 && (
+        <>
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <SortableTh<MagicSet> label="Code" field="set_code" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Name" field="set_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Released" field="release_date" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Type" field="set_type" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Cards" field="card_count" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Printed" field="printed_size" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Block code" field="block_code" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Block" field="block_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <th style={{ width: 160 }}>Ações</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pageRows.map((s) => (
+                  <tr key={s.set_code}>
+                    <td><code>{s.set_code}</code></td>
+                    <td>{s.set_name}</td>
+                    <td>{s.release_date ?? '-'}</td>
+                    <td>{s.set_type ?? '-'}</td>
+                    <td>{s.card_count ?? '-'}</td>
+                    <td>{s.printed_size ?? '-'}</td>
+                    <td>{s.block_code ?? '-'}</td>
+                    <td>{s.block_name ?? '-'}</td>
+                    <td className="actions">
+                      <button type="button" onClick={() => onEdit(s)}>Editar</button>
+                      <button type="button" className="danger" onClick={() => void onDelete(s.set_code)}>
+                        Deletar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <PaginationBar
+            page={page}
+            pageCount={pageCount}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
       )}
     </section>
   )
