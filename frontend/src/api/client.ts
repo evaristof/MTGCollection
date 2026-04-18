@@ -1,6 +1,7 @@
 import type {
   CardPrice,
   CollectionCard,
+  ImportJobSnapshot,
   MagicSet,
   ScryfallSet,
 } from '../types/mtg'
@@ -126,6 +127,29 @@ export const api = {
     }),
   deleteCard: (id: number) =>
     request<void>(`/api/collection/cards/${id}`, { method: 'DELETE' }),
+
+  // Collection import (async)
+  importCollection: async (file: File): Promise<ImportJobSnapshot> => {
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch(`${API_BASE_URL}/api/collection/import`, {
+      method: 'POST',
+      body,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(
+        `Falha ao iniciar import: HTTP ${res.status}${text ? ` — ${text}` : ''}`,
+      )
+    }
+    return (await res.json()) as ImportJobSnapshot
+  },
+  importStatus: (jobId: string) =>
+    request<ImportJobSnapshot>(
+      `/api/collection/import/${encodeURIComponent(jobId)}/status`,
+    ),
+  importDownloadUrl: (jobId: string) =>
+    `${API_BASE_URL}/api/collection/import/${encodeURIComponent(jobId)}/download`,
 
   // Prices
   priceByName: (name: string, set: string, foil: boolean) =>

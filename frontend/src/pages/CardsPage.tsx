@@ -5,6 +5,7 @@ import { useTableControls } from '../hooks/useTableControls'
 import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
 import { SetCombo } from '../components/SetCombo'
+import { ImportCollectionDialog } from '../components/ImportCollectionDialog'
 
 type AddFormState = AddCardInput
 type EditFormState = {
@@ -33,6 +34,7 @@ export default function CardsPage() {
   const [filterSet, setFilterSet] = useState<string>('')
   const [addForm, setAddForm] = useState<AddFormState>(EMPTY_ADD)
   const [editing, setEditing] = useState<EditFormState | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   const loadCards = useCallback(async () => {
     setLoading(true)
@@ -152,6 +154,20 @@ export default function CardsPage() {
     }
   }
 
+  const formatMoney = (value: number | null | undefined): string => {
+    if (value === null || value === undefined) return '-'
+    return value.toLocaleString('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+    })
+  }
+
+  const totalFor = (c: CollectionCard): number | null => {
+    if (c.price === null || c.price === undefined) return null
+    return Number(c.price) * c.quantity
+  }
+
   const onDelete = async (id: number) => {
     if (!confirm(`Deletar a carta #${id}?`)) return
     setError(null)
@@ -181,8 +197,17 @@ export default function CardsPage() {
           <button onClick={() => void loadCards()} disabled={loading}>
             Recarregar
           </button>
+          <button type="button" onClick={() => setImportOpen(true)}>
+            Importar coleção…
+          </button>
         </div>
       </div>
+
+      <ImportCollectionDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={() => void loadCards()}
+      />
 
       {error && <p className="error">{error}</p>}
 
@@ -324,6 +349,10 @@ export default function CardsPage() {
                   <SortableTh<CollectionCard> label="Foil" field="foil" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <SortableTh<CollectionCard> label="Lang" field="language" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <SortableTh<CollectionCard> label="Qtd" field="quantity" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Preço (US$)" field="price" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <th>Total (US$)</th>
+                  <SortableTh<CollectionCard> label="Comentário" field="comentario" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<CollectionCard> label="Localização" field="localizacao" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <th style={{ width: 160 }}>Ações</th>
                 </tr>
               </thead>
@@ -338,6 +367,10 @@ export default function CardsPage() {
                     <td>{c.foil ? '✦' : '—'}</td>
                     <td>{c.language}</td>
                     <td>{c.quantity}</td>
+                    <td>{formatMoney(c.price)}</td>
+                    <td>{formatMoney(totalFor(c))}</td>
+                    <td>{c.comentario ?? '-'}</td>
+                    <td>{c.localizacao ?? '-'}</td>
                     <td className="actions">
                       <button type="button" onClick={() => onStartEdit(c)}>Editar</button>
                       <button type="button" className="danger" onClick={() => void onDelete(c.id)}>

@@ -20,6 +20,7 @@
     <properties>
         <java.version>21</java.version>
         <gson.version>2.10.1</gson.version>
+        <poi.version>5.2.5</poi.version>
     </properties>
 
     <dependencies>
@@ -48,6 +49,12 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>${gson.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
         </dependency>
 
         <dependency>

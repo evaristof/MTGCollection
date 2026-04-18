@@ -75,6 +75,7 @@ export function SetCombo({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setQuery('')
     const idx = filteredItems.findIndex((i) => i.code === value)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIdx(idx >= 0 ? idx : 0)
     // Focus on next tick so the input exists in the DOM.
     const t = window.setTimeout(() => inputRef.current?.focus(), 0)
