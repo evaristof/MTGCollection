@@ -62,6 +62,7 @@ export function SetCombo({
   useEffect(() => {
     if (!open) return
     const idx = items.findIndex((i) => i.code === value)
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveIdx(idx >= 0 ? idx : 0)
   }, [open, items, value])
 
