@@ -394,7 +394,7 @@ label.inline {
 .combo {
   position: relative;
   display: inline-block;
-  min-width: 220px;
+  min-width: 320px;
 }
 
 .combo__button {
@@ -439,21 +439,45 @@ label.inline {
   color: var(--fg-soft);
 }
 
-.combo__list {
+.combo__popover {
   position: absolute;
   z-index: 10;
   top: calc(100% + 4px);
   left: 0;
-  right: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(560px, 90vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-alt);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.combo__search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: none;
+  border-bottom: 1px solid var(--border-strong);
+  font: inherit;
+  outline: none;
+}
+
+.combo__search:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.combo__list {
   max-height: 320px;
   overflow-y: auto;
   margin: 0;
   padding: 0.25rem;
   list-style: none;
-  background: var(--bg-alt);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
 .combo__option {
@@ -463,8 +487,6 @@ label.inline {
   cursor: pointer;
   font-size: 0.9rem;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .combo__option--active {
@@ -474,6 +496,12 @@ label.inline {
 .combo__option--selected {
   color: var(--accent-strong);
   font-weight: 600;
+}
+
+.combo__option--empty {
+  color: var(--fg-soft);
+  cursor: default;
+  font-style: italic;
 }
 
 /* ---------- Sortable headers ---------- */
