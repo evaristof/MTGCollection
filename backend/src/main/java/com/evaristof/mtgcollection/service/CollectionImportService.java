@@ -80,13 +80,16 @@ public class CollectionImportService {
     private final CardLookupService cardLookupService;
     private final CollectionCardRepository cardRepository;
     private final MagicSetRepository setRepository;
+    private final SetPersistenceService setPersistenceService;
 
     public CollectionImportService(CardLookupService cardLookupService,
                                    CollectionCardRepository cardRepository,
-                                   MagicSetRepository setRepository) {
+                                   MagicSetRepository setRepository,
+                                   SetPersistenceService setPersistenceService) {
         this.cardLookupService = cardLookupService;
         this.cardRepository = cardRepository;
         this.setRepository = setRepository;
+        this.setPersistenceService = setPersistenceService;
     }
 
     /**
@@ -96,6 +99,17 @@ public class CollectionImportService {
      */
     public void runImport(ImportJob job, byte[] xlsxBytes) {
         Map<String, MagicSet> setsByName = indexSetsByName();
+        if (setsByName.isEmpty()) {
+            log.warn("Magic set table is empty — attempting to sync from Scryfall before import");
+            try {
+                setPersistenceService.syncSetsFromScryfall();
+                setsByName = indexSetsByName();
+            } catch (RuntimeException e) {
+                log.warn("Auto-sync of sets failed: {}", e.getMessage());
+                job.addError("Não foi possível sincronizar os sets automaticamente: " + e.getMessage()
+                        + ". As linhas ser\u00e3o gravadas sem set_code resolvido.");
+            }
+        }
 
         try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(xlsxBytes))) {
             job.setTotal(countImportableRows(workbook));
@@ -201,25 +215,35 @@ public class CollectionImportService {
         BigDecimal price = null;
 
         if (manualOverride) {
-            // Preserve whatever the user already typed in E/G on the sheet.
+            // For manual overrides we must preserve the user's existing E/G
+            // values (often formulas) in the spreadsheet. Read the cached
+            // results for DB persistence but leave the cells untouched.
             cardType = readString(row.getCell(COL_TYPE));
-        } else if (setCode == null) {
-            throw new IllegalStateException(
-                    "Set não encontrado no banco: '" + setName + "'. Sincronize os sets e tente novamente.");
+            price = readBigDecimal(row.getCell(COL_PRICE));
         } else {
-            ScryfallCard scryfallCard = lookupCard(cardName, number, setCode, rowRef);
-            if (scryfallCard != null) {
-                cardType = scryfallCard.getTypeLine();
-                if (cardNumber == null || cardNumber.isBlank()) {
-                    cardNumber = scryfallCard.getCollectorNumber();
+            if (setCode == null) {
+                job.addError(rowRef + ": set '" + setName
+                        + "' não está na base de sets — linha gravada sem preço (sincronize os sets para enriquecer).");
+            } else {
+                try {
+                    ScryfallCard scryfallCard = lookupCard(cardName, number, setCode, rowRef);
+                    if (scryfallCard != null) {
+                        cardType = scryfallCard.getTypeLine();
+                        if (cardNumber == null || cardNumber.isBlank()) {
+                            cardNumber = scryfallCard.getCollectorNumber();
+                        }
+                        price = priceFrom(scryfallCard, foil);
+                    }
+                } catch (RuntimeException e) {
+                    job.addError(rowRef + ": Scryfall falhou (" + e.getMessage() + ") — linha gravada sem preço.");
                 }
-                price = priceFrom(scryfallCard, foil);
+                throttle();
             }
-            throttle();
+            // Only overwrite the cells when we actually resolved a value,
+            // so rows whose lookup failed keep whatever the user had there.
+            if (cardType != null) writeCellString(row, COL_TYPE, cardType);
+            if (price != null) writeCellNumeric(row, COL_PRICE, price);
         }
-
-        writeCellString(row, COL_TYPE, cardType);
-        writeCellNumeric(row, COL_PRICE, price);
 
         persist(rowRef, cardName, setCode, setName, foil, quantity, cardType,
                 cardNumber, price, comentario, language, localizacao, job);
@@ -268,21 +292,18 @@ public class CollectionImportService {
             job.addError(rowRef + ": nome da carta vazio, não gravado no banco");
             return;
         }
-        if (setCode == null || setCode.isBlank()) {
-            job.addError(rowRef + ": set '" + setName + "' não encontrado, não gravado no banco");
-            return;
-        }
 
         CollectionCard entity = new CollectionCard();
         entity.setCardName(cardName);
         entity.setSetCode(setCode);
+        entity.setSetNameRaw(setName);
         entity.setFoil(foil);
         entity.setQuantity(Math.max(quantity, 1));
         entity.setCardType(cardType);
-        entity.setCardNumber(cardNumber == null || cardNumber.isBlank() ? "" : cardNumber);
+        entity.setCardNumber(cardNumber == null || cardNumber.isBlank() ? null : cardNumber);
         entity.setPrice(price);
         entity.setComentario(comentario);
-        entity.setLanguage(language == null || language.isBlank() ? "English" : language);
+        entity.setLanguage(language == null || language.isBlank() ? null : language);
         entity.setLocalizacao(localizacao);
         cardRepository.save(entity);
         job.incrementPersisted();
@@ -315,6 +336,29 @@ public class CollectionImportService {
             return Long.toString((long) v);
         }
         return Double.toString(v);
+    }
+
+    private BigDecimal readBigDecimal(Cell cell) {
+        if (cell == null) return null;
+        try {
+            switch (cell.getCellType()) {
+                case NUMERIC -> { return BigDecimal.valueOf(cell.getNumericCellValue()); }
+                case STRING -> {
+                    String s = cell.getStringCellValue();
+                    if (s == null || s.isBlank()) return null;
+                    return new BigDecimal(s.trim());
+                }
+                case FORMULA -> {
+                    if (cell.getCachedFormulaResultType() == CellType.NUMERIC) {
+                        return BigDecimal.valueOf(cell.getNumericCellValue());
+                    }
+                }
+                default -> { return null; }
+            }
+        } catch (NumberFormatException | IllegalStateException e) {
+            return null;
+        }
+        return null;
     }
 
     private int readQuantity(Cell cell) {

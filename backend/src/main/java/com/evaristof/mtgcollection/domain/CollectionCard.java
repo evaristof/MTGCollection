@@ -27,14 +27,21 @@ public class CollectionCard {
     @Column(name = "ID")
     private Long id;
 
-    @Column(name = "CARD_NUMBER", nullable = false, length = 32)
+    @Column(name = "CARD_NUMBER", length = 32)
     private String cardNumber;
 
     @Column(name = "CARD_NAME", nullable = false)
     private String cardName;
 
-    @Column(name = "SET_CODE", nullable = false, length = 16)
+    @Column(name = "SET_CODE", length = 16)
     private String setCode;
+
+    /**
+     * Original set name from the imported spreadsheet when {@link #setCode}
+     * could not be resolved (e.g. sets not yet synced from Scryfall).
+     */
+    @Column(name = "SET_NAME_RAW", length = 255)
+    private String setNameRaw;
 
     @Column(name = "FOIL", nullable = false)
     private boolean foil;
@@ -146,6 +153,14 @@ public class CollectionCard {
 
     public void setLocalizacao(String localizacao) {
         this.localizacao = localizacao;
+    }
+
+    public String getSetNameRaw() {
+        return setNameRaw;
+    }
+
+    public void setSetNameRaw(String setNameRaw) {
+        this.setNameRaw = setNameRaw;
     }
 
     @Override
