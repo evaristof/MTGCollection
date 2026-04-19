@@ -243,6 +243,32 @@
             <id>jpackage</id>
             <build>
                 <plugins>
+                    <!-- Derive a Windows-Installer-safe version from project.version
+                         by stripping the -SNAPSHOT suffix. The MSI/EXE bundler
+                         rejects anything that isn't major.minor.build. Falls
+                         back to project.version for release builds that have
+                         no suffix. -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>strip-snapshot-for-jpackage</id>
+                                <phase>validate</phase>
+                                <goals>
+                                    <goal>regex-property</goal>
+                                </goals>
+                                <configuration>
+                                    <name>jpackage.appVersion</name>
+                                    <value>${project.version}</value>
+                                    <regex>-SNAPSHOT$</regex>
+                                    <replacement></replacement>
+                                    <failIfNoMatch>false</failIfNoMatch>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                     <!-- Stage a clean input folder containing only the fat
                          jar. jpackage's input flag copies the entire input
                          directory into lib/app/, so pointing it at target/
@@ -284,7 +310,7 @@
                                 </goals>
                                 <configuration>
                                     <name>MTGCollection</name>
-                                    <appVersion>${project.version}</appVersion>
+                                    <appVersion>${jpackage.appVersion}</appVersion>
                                     <vendor>evaristof</vendor>
                                     <destination>${project.build.directory}/jpackage</destination>
                                     <input>${project.build.directory}/jpackage-input</input>
