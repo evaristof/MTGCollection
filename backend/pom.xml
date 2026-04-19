@@ -21,6 +21,15 @@
         <java.version>21</java.version>
         <gson.version>2.10.1</gson.version>
         <poi.version>5.2.5</poi.version>
+        <!-- frontend-maven-plugin needs Node + npm to build the React bundle
+             inside the `dist` Maven profile. Bumped to the current LTS. -->
+        <!-- Vite 8 requires Node 20.19+ or 22.12+; use a current 22 LTS. -->
+        <node.version>v22.12.0</node.version>
+        <npm.version>10.9.0</npm.version>
+        <frontend-maven-plugin.version>1.15.0</frontend-maven-plugin.version>
+        <jpackage-maven-plugin.version>1.6.5</jpackage-maven-plugin.version>
+        <!-- Folder (relative to the backend pom) that holds the React project. -->
+        <frontend.dir>${project.basedir}/../frontend</frontend.dir>
     </properties>
 
     <dependencies>
@@ -39,9 +48,18 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- Keep H2 available at runtime: used by automated tests and by the
+             alternate MtgCollectionH2Application entry point. -->
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- PostgreSQL driver: used by the default `prod` profile. -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -72,8 +90,230 @@
                 <configuration>
                     <!-- Força IPv4 também na JVM forked pelo `mvn spring-boot:run`. -->
                     <jvmArguments>-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true</jvmArguments>
+                    <!-- The default entry point is the Postgres-backed main. -->
+                    <mainClass>com.evaristof.mtgcollection.MtgCollectionApplication</mainClass>
                 </configuration>
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- =================================================================
+             dist — self-contained distributable.
+
+             Runs the frontend build, embeds the built SPA into the Spring Boot
+             jar (served from /), and produces a .zip alongside the jar that
+             contains:
+                 * mtgcollection-<ver>.jar
+                 * start.bat      (Windows launcher)
+                 * start.sh       (Linux/macOS launcher)
+                 * README-dist.txt
+
+             Intentionally *not* active by default so plain `mvn clean install`
+             stays fast. Activate explicitly:
+
+                 mvn -Pdist clean package
+
+             The resulting zip lives at
+             `backend/target/mtgcollection-<ver>-dist.zip`.
+             ================================================================ -->
+        <profile>
+            <id>dist</id>
+            <build>
+                <plugins>
+                    <!-- 1. Build the Vite/React frontend. -->
+                    <plugin>
+                        <groupId>com.github.eirslett</groupId>
+                        <artifactId>frontend-maven-plugin</artifactId>
+                        <version>${frontend-maven-plugin.version}</version>
+                        <configuration>
+                            <workingDirectory>${frontend.dir}</workingDirectory>
+                            <installDirectory>${project.build.directory}/frontend-node</installDirectory>
+                            <nodeVersion>${node.version}</nodeVersion>
+                            <npmVersion>${npm.version}</npmVersion>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>install-node-and-npm</id>
+                                <goals>
+                                    <goal>install-node-and-npm</goal>
+                                </goals>
+                                <phase>generate-resources</phase>
+                            </execution>
+                            <execution>
+                                <id>npm-ci</id>
+                                <goals>
+                                    <goal>npm</goal>
+                                </goals>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <arguments>ci</arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>npm-build</id>
+                                <goals>
+                                    <goal>npm</goal>
+                                </goals>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <arguments>run build</arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- 2. Copy the built SPA into the jar under /static so
+                         Spring Boot serves it at http://localhost:8080/. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-frontend-dist-to-static</id>
+                                <phase>process-resources</phase>
+                                <goals>
+                                    <goal>copy-resources</goal>
+                                </goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${frontend.dir}/dist</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- 3. Produce the .zip bundle (jar + launchers + readme). -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>dist-zip</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>single</goal>
+                                </goals>
+                                <configuration>
+                                    <appendAssemblyId>true</appendAssemblyId>
+                                    <descriptors>
+                                        <descriptor>src/assembly/dist.xml</descriptor>
+                                    </descriptors>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- =================================================================
+             jpackage — native Windows/Linux/macOS installer with bundled JRE.
+
+             Wraps the fat jar in an OS-specific installer using the `jpackage`
+             tool from the JDK. The artifact type depends on the host OS:
+                 * Windows → .exe / .msi
+                 * Linux   → .deb / .rpm
+                 * macOS   → .pkg / .dmg
+
+             You must run this profile on the target OS to get the matching
+             artifact (i.e. run `mvn -Pjpackage package` on Windows to get the
+             Windows installer).
+
+             Activate:
+                 mvn -Pdist,jpackage clean package
+             (The `dist` profile must also be active so the fat jar exists and
+             already contains the embedded frontend.)
+             ================================================================ -->
+        <profile>
+            <id>jpackage</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.panteleyev</groupId>
+                        <artifactId>jpackage-maven-plugin</artifactId>
+                        <version>${jpackage-maven-plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>jpackage</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jpackage</goal>
+                                </goals>
+                                <configuration>
+                                    <name>MTGCollection</name>
+                                    <appVersion>${project.version}</appVersion>
+                                    <vendor>evaristof</vendor>
+                                    <destination>${project.build.directory}/jpackage</destination>
+                                    <input>${project.build.directory}</input>
+                                    <mainJar>${project.build.finalName}.jar</mainJar>
+                                    <mainClass>org.springframework.boot.loader.launch.JarLauncher</mainClass>
+                                    <javaOptions>
+                                        <option>-Djava.net.preferIPv4Stack=true</option>
+                                        <option>-Djava.net.preferIPv4Addresses=true</option>
+                                    </javaOptions>
+                                    <!-- OS-specific installer types are picked
+                                         up automatically; these flags just make
+                                         the shortcuts behave sensibly. -->
+                                    <winConsole>true</winConsole>
+                                    <winDirChooser>true</winDirChooser>
+                                    <winMenu>true</winMenu>
+                                    <winShortcut>true</winShortcut>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- =================================================================
+             native — GraalVM native image (single binary, no JRE required).
+
+             Produces a native executable at
+             `backend/target/mtgcollection` (or `mtgcollection.exe` on Windows).
+             The image inherits the OS of the build machine.
+
+             Requires GraalVM 21+ with the `native-image` tool on PATH. Build
+             times are slow (often 3-5 minutes) and Spring Boot / Hibernate /
+             GSON may need reflection hints — if anything fails at build or
+             runtime, we can add hints under `src/main/resources/META-INF/
+             native-image/`.
+
+             Activate:
+                 mvn -Pnative -DskipTests clean package
+             ================================================================ -->
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                        <configuration>
+                            <imageName>mtgcollection</imageName>
+                            <mainClass>com.evaristof.mtgcollection.MtgCollectionApplication</mainClass>
+                            <buildArgs>
+                                <buildArg>-H:+UnlockExperimentalVMOptions</buildArg>
+                            </buildArgs>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
