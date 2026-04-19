@@ -12,7 +12,6 @@ import { api } from '../api/client'
 
 interface DumpTotalPoint {
   timestamp: string
-  label: string
   value: number
 }
 
@@ -65,7 +64,6 @@ export default function ChartsPage() {
       setPoints(
         rows.map((r) => ({
           timestamp: r.data_dump_date_time,
-          label: formatTimestamp(r.data_dump_date_time),
           // The API returns `total_value` as a JSON number (BigDecimal is
           // serialized as a plain number by Jackson). Cast to Number just in
           // case a future change ever switches it back to a string.
@@ -180,7 +178,11 @@ export default function ChartsPage() {
             <ResponsiveContainer>
               <LineChart data={points} margin={{ top: 16, right: 24, left: 8, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-                <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                <XAxis
+                  dataKey="timestamp"
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={formatTimestamp}
+                />
                 <YAxis
                   tick={{ fontSize: 12 }}
                   tickFormatter={(v: number) =>
@@ -190,7 +192,7 @@ export default function ChartsPage() {
                 />
                 <Tooltip
                   formatter={(v) => [formatMoney(Number(v)), 'Valor total']}
-                  labelFormatter={(label) => `Snapshot: ${String(label)}`}
+                  labelFormatter={(label) => `Snapshot: ${formatTimestamp(String(label))}`}
                 />
                 <Line
                   type="monotone"
