@@ -28,6 +28,12 @@
         <npm.version>10.9.0</npm.version>
         <frontend-maven-plugin.version>1.15.0</frontend-maven-plugin.version>
         <jpackage-maven-plugin.version>1.6.5</jpackage-maven-plugin.version>
+        <!-- Output type for the `jpackage` profile. Default is APP_IMAGE, which
+             produces a self-contained folder with the launcher executable +
+             bundled JRE (no WiX/DPKG/RPM needed). Override on the CLI to get
+             a real installer: -Djpackage.type=EXE | MSI | DEB | RPM | PKG | DMG.
+             See the profile below for the full list of caveats. -->
+        <jpackage.type>APP_IMAGE</jpackage.type>
         <!-- Folder (relative to the backend pom) that holds the React project. -->
         <frontend.dir>${project.basedir}/../frontend</frontend.dir>
     </properties>
@@ -213,27 +219,58 @@
         </profile>
 
         <!-- =================================================================
-             jpackage — native Windows/Linux/macOS installer with bundled JRE.
+             jpackage — self-contained native bundle with embedded JRE.
 
-             Wraps the fat jar in an OS-specific installer using the `jpackage`
-             tool from the JDK. The artifact type depends on the host OS:
-                 * Windows → .exe / .msi
-                 * Linux   → .deb / .rpm
-                 * macOS   → .pkg / .dmg
+             By default (APP_IMAGE) produces a folder under
+             `backend/target/jpackage/MTGCollection/` containing an executable
+             launcher + a trimmed JRE. Zip the folder and it runs on any
+             Windows machine without a JDK install. Only needs the JDK itself
+             (jpackage ships inside it).
 
-             You must run this profile on the target OS to get the matching
-             artifact (i.e. run `mvn -Pjpackage package` on Windows to get the
-             Windows installer).
+             To build an actual OS installer instead, pass the desired type:
+                 mvn -Pdist,jpackage -Djpackage.type=EXE clean package   (Windows, needs WiX 3)
+                 mvn -Pdist,jpackage -Djpackage.type=MSI clean package   (Windows, needs WiX 3)
+                 mvn -Pdist,jpackage -Djpackage.type=DEB clean package   (Linux, needs dpkg)
+                 mvn -Pdist,jpackage -Djpackage.type=RPM clean package   (Linux, needs rpm-build)
+                 mvn -Pdist,jpackage -Djpackage.type=PKG clean package   (macOS)
+                 mvn -Pdist,jpackage -Djpackage.type=DMG clean package   (macOS)
 
-             Activate:
-                 mvn -Pdist,jpackage clean package
-             (The `dist` profile must also be active so the fat jar exists and
-             already contains the embedded frontend.)
+             jpackage inherits the OS of the build machine — always run it on
+             the target OS. The `dist` profile must also be active so the fat
+             jar already exists with the embedded frontend.
              ================================================================ -->
         <profile>
             <id>jpackage</id>
             <build>
                 <plugins>
+                    <!-- Stage a clean input folder containing only the fat
+                         jar. jpackage's input flag copies the entire input
+                         directory into lib/app/, so pointing it at target/
+                         (which also holds the dist zip, the jpackage output,
+                         node binaries, etc.) would make it recurse into
+                         itself. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>stage-jpackage-input</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>run</goal>
+                                </goals>
+                                <configuration>
+                                    <target>
+                                        <delete dir="${project.build.directory}/jpackage-input" quiet="true"/>
+                                        <delete dir="${project.build.directory}/jpackage" quiet="true"/>
+                                        <mkdir dir="${project.build.directory}/jpackage-input"/>
+                                        <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                                              todir="${project.build.directory}/jpackage-input"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
                     <plugin>
                         <groupId>org.panteleyev</groupId>
                         <artifactId>jpackage-maven-plugin</artifactId>
@@ -250,20 +287,21 @@
                                     <appVersion>${project.version}</appVersion>
                                     <vendor>evaristof</vendor>
                                     <destination>${project.build.directory}/jpackage</destination>
-                                    <input>${project.build.directory}</input>
+                                    <input>${project.build.directory}/jpackage-input</input>
                                     <mainJar>${project.build.finalName}.jar</mainJar>
                                     <mainClass>org.springframework.boot.loader.launch.JarLauncher</mainClass>
                                     <javaOptions>
                                         <option>-Djava.net.preferIPv4Stack=true</option>
                                         <option>-Djava.net.preferIPv4Addresses=true</option>
                                     </javaOptions>
-                                    <!-- OS-specific installer types are picked
-                                         up automatically; these flags just make
-                                         the shortcuts behave sensibly. -->
+                                    <!-- Output type (APP_IMAGE by default so
+                                         WiX/dpkg/rpm are not required). Override
+                                         with -Djpackage.type=EXE etc. -->
+                                    <type>${jpackage.type}</type>
+                                    <!-- Keep a console window so server logs
+                                         are visible. Only has any effect on
+                                         Windows bundles; ignored elsewhere. -->
                                     <winConsole>true</winConsole>
-                                    <winDirChooser>true</winDirChooser>
-                                    <winMenu>true</winMenu>
-                                    <winShortcut>true</winShortcut>
                                 </configuration>
                             </execution>
                         </executions>
