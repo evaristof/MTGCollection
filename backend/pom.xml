@@ -100,6 +100,37 @@
                     <mainClass>com.evaristof.mtgcollection.MtgCollectionApplication</mainClass>
                 </configuration>
             </plugin>
+
+            <!-- Gera `schema-postgres.sql` (+ `-drop.sql`) em build time.
+                 Bind no `process-classes` para que `mvn clean install`,
+                 `mvn clean package` ou `mvn compile` produzam os scripts em
+                 `${project.build.directory}/generated-sql/` a partir dos
+                 `@Entity` atuais do código, sem precisar subir a app. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>generate-postgres-schema</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.evaristof.mtgcollection.tools.SchemaGenerator</mainClass>
+                            <!-- `runtime` pulls in hibernate-commons-annotations,
+                                 jandex, byte-buddy etc. which the ORM bootstrap
+                                 needs at runtime but are not declared as
+                                 compile-scoped deps. -->
+                            <classpathScope>runtime</classpathScope>
+                            <arguments>
+                                <argument>${project.build.directory}/generated-sql</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
