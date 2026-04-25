@@ -32,6 +32,9 @@ public class ScryfallSet {
     @SerializedName("block")
     private String block;
 
+    @SerializedName("icon_svg_uri")
+    private String iconSvgUri;
+
     public ScryfallSet() {
     }
 
@@ -97,5 +100,13 @@ public class ScryfallSet {
 
     public void setBlock(String block) {
         this.block = block;
+    }
+
+    public String getIconSvgUri() {
+        return iconSvgUri;
+    }
+
+    public void setIconSvgUri(String iconSvgUri) {
+        this.iconSvgUri = iconSvgUri;
     }
 }

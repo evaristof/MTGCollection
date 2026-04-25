@@ -52,6 +52,7 @@ public class SetPersistenceService {
         entity.setPrintedSize(s.getPrintedSize());
         entity.setBlockCode(s.getBlockCode());
         entity.setBlockName(s.getBlock());
+        entity.setIconSvgUri(s.getIconSvgUri());
         return entity;
     }
 

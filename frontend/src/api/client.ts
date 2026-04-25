@@ -208,6 +208,11 @@ export const api = {
   importDownloadUrl: (jobId: string) =>
     `${API_BASE_URL}/api/collection/import/${encodeURIComponent(jobId)}/download`,
 
+  // Set icons
+  setIconUrl: (code: string) =>
+    `${API_BASE_URL}/api/sets/${encodeURIComponent(code)}/icon`,
+  syncSetIcons: () => request<{ synced: number }>('/api/sets/sync-icons', { method: 'POST' }),
+
   // Card images
   cardImageUrl: (id: number, face = 0) =>
     `${API_BASE_URL}/api/collection/cards/${id}/image?face=${face}`,
