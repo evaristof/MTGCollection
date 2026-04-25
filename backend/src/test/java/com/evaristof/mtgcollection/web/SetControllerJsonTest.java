@@ -1,6 +1,7 @@
 package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallSet;
+import com.evaristof.mtgcollection.service.SetImageService;
 import com.evaristof.mtgcollection.service.SetPersistenceService;
 import com.evaristof.mtgcollection.service.SetService;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,9 @@ class SetControllerJsonTest {
 
     @MockBean
     private SetPersistenceService setPersistenceService;
+
+    @MockBean
+    private SetImageService setImageService;
 
     @Test
     void listSets_serializesWithSnakeCaseFieldNames() throws Exception {

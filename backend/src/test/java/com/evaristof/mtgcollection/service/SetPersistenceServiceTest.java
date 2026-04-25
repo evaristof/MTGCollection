@@ -20,15 +20,13 @@ class SetPersistenceServiceTest {
 
     private SetService setService;
     private MagicSetRepository repository;
-    private SetImageService setImageService;
     private SetPersistenceService service;
 
     @BeforeEach
     void setUp() {
         setService = mock(SetService.class);
         repository = mock(MagicSetRepository.class);
-        setImageService = mock(SetImageService.class);
-        service = new SetPersistenceService(setService, repository, setImageService);
+        service = new SetPersistenceService(setService, repository);
     }
 
     private ScryfallSet sampleSet() {

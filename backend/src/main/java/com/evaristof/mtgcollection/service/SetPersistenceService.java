@@ -20,19 +20,15 @@ public class SetPersistenceService {
 
     private final SetService setService;
     private final MagicSetRepository repository;
-    private final SetImageService setImageService;
 
-    public SetPersistenceService(SetService setService, MagicSetRepository repository,
-                                 SetImageService setImageService) {
+    public SetPersistenceService(SetService setService, MagicSetRepository repository) {
         this.setService = setService;
         this.repository = repository;
-        this.setImageService = setImageService;
     }
 
     /**
      * Fetches all Magic sets from Scryfall and persists them to the database.
      * Existing rows with the same SET_CODE are overwritten (save-all upsert).
-     * After persisting, downloads set icons to MinIO in the background.
      *
      * @return the list of persisted {@link MagicSet} entities
      */
@@ -43,13 +39,7 @@ public class SetPersistenceService {
         for (ScryfallSet s : scryfallSets) {
             entities.add(toEntity(s));
         }
-        List<MagicSet> saved = repository.saveAll(entities);
-        try {
-            setImageService.syncAllSetIcons();
-        } catch (RuntimeException e) {
-            // icon sync is best-effort; don't fail the set sync
-        }
-        return saved;
+        return repository.saveAll(entities);
     }
 
     static MagicSet toEntity(ScryfallSet s) {
