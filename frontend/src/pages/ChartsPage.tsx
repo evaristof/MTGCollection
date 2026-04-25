@@ -9,6 +9,8 @@ import {
   YAxis,
 } from 'recharts'
 import { api } from '../api/client'
+import type { CardMover, PriceMoversResponse } from '../types/mtg'
+import { CardImageTooltip } from '../components/CardImageTooltip'
 
 interface DumpTotalPoint {
   timestamp: string
@@ -52,24 +54,24 @@ export default function ChartsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [points, setPoints] = useState<DumpTotalPoint[]>([])
+  const [movers, setMovers] = useState<PriceMoversResponse | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const rows = await api.dumpTotalValues({
-        from: from.trim() || undefined,
-        to: to.trim() || undefined,
-      })
+      const params = { from: from.trim() || undefined, to: to.trim() || undefined }
+      const [rows, moversResult] = await Promise.all([
+        api.dumpTotalValues(params),
+        api.dumpPriceMovers(params).catch(() => null),
+      ])
       setPoints(
         rows.map((r) => ({
           timestamp: r.data_dump_date_time,
-          // The API returns `total_value` as a JSON number (BigDecimal is
-          // serialized as a plain number by Jackson). Cast to Number just in
-          // case a future change ever switches it back to a string.
           value: Number(r.total_value),
         })),
       )
+      setMovers(moversResult)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -78,6 +80,7 @@ export default function ChartsPage() {
   }, [from, to])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
   }, [load])
 
@@ -207,8 +210,92 @@ export default function ChartsPage() {
               </LineChart>
             </ResponsiveContainer>
           </div>
+
+          {movers && (movers.top_gainers.length > 0 || movers.top_losers.length > 0) && (
+            <>
+              <h3 style={{ marginTop: 24 }}>
+                Maiores variações de preço{' '}
+                <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+                  ({formatTimestamp(movers.old_timestamp)} → {formatTimestamp(movers.new_timestamp)})
+                </span>
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                <MoverTable
+                  title="Top 10 — Valorizaram"
+                  cards={movers.top_gainers}
+                  positive
+                />
+                <MoverTable
+                  title="Top 10 — Desvalorizaram"
+                  cards={movers.top_losers}
+                  positive={false}
+                />
+              </div>
+            </>
+          )}
         </>
       )}
     </section>
+  )
+}
+
+function MoverTable({
+  title,
+  cards,
+  positive,
+}: {
+  title: string
+  cards: CardMover[]
+  positive: boolean
+}) {
+  if (cards.length === 0) {
+    return (
+      <div>
+        <h3>{title}</h3>
+        <p className="muted">Nenhuma carta encontrada.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <h3>{title}</h3>
+      <div className="table-wrapper">
+        <table style={{ minWidth: 'auto' }}>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Carta</th>
+              <th>Coleção</th>
+              <th>Foil</th>
+              <th>Anterior</th>
+              <th>Atual</th>
+              <th>Variação</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cards.map((c, i) => (
+              <tr key={c.source_card_id != null ? c.source_card_id : `${c.card_name}-${c.set_code}-${c.foil}-${i}`}>
+                <td>{i + 1}</td>
+                <td>
+                  {c.source_card_id != null ? (
+                    <CardImageTooltip cardId={c.source_card_id} cardName={c.card_name} />
+                  ) : (
+                    c.card_name
+                  )}
+                </td>
+                <td title={c.set_code}>{c.set_name_raw || c.set_code}</td>
+                <td>{c.foil ? 'Sim' : 'Não'}</td>
+                <td>{formatMoney(c.price_old)}</td>
+                <td>{formatMoney(c.price_new)}</td>
+                <td style={{ color: positive ? '#2e7d32' : '#c62828', fontWeight: 600 }}>
+                  {positive ? '+' : ''}{formatMoney(c.price_diff)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }

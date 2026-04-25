@@ -41,6 +41,18 @@ public interface CollectionCardDataDumpRepository
     long countBySourceCardId(@Param("sourceCardId") Long sourceCardId);
 
     /**
+     * Distinct dump timestamps in ascending order within the given range.
+     * Used by the price-movers calculation to find the two most recent
+     * snapshots within the user's selected interval.
+     */
+    @Query("select distinct d.dataDumpDateTime from CollectionCardDataDump d "
+            + "where d.dataDumpDateTime >= :from and d.dataDumpDateTime <= :to "
+            + "order by d.dataDumpDateTime asc")
+    List<LocalDateTime> findDumpTimestampsBetween(
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to);
+
+    /**
      * Aggregates each snapshot's total collection value ({@code SUM(price * quantity)})
      * within the inclusive range {@code [from, to]}. Rows with {@code NULL}
      * prices are treated as zero so a dump that only has priced cards still
