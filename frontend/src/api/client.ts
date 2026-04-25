@@ -169,20 +169,14 @@ export const api = {
       `/api/collection/datadumps/stats/total-value${suffix}`,
     )
   },
-  dumpPriceMovers: async (params: { from?: string; to?: string }): Promise<PriceMoversResponse | null> => {
+  dumpPriceMovers: (params: { from?: string; to?: string }): Promise<PriceMoversResponse | undefined> => {
     const qs = new URLSearchParams()
     if (params.from) qs.set('from', params.from)
     if (params.to) qs.set('to', params.to)
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
-    const res = await fetch(`${API_BASE_URL}/api/collection/datadumps/stats/price-movers${suffix}`, {
-      headers: { Accept: 'application/json' },
-    })
-    if (res.status === 204) return null
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(`Request failed ${res.status}${text ? `: ${text}` : ''}`)
-    }
-    return res.json() as Promise<PriceMoversResponse>
+    return request<PriceMoversResponse>(
+      `/api/collection/datadumps/stats/price-movers${suffix}`,
+    )
   },
 
   // Collection import (async)

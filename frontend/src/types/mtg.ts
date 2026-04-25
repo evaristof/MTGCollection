@@ -73,6 +73,7 @@ export interface CardMover {
   set_code: string
   set_name_raw: string | null
   foil: boolean
+  language: string | null
   source_card_id: number | null
   price_old: number
   price_new: number

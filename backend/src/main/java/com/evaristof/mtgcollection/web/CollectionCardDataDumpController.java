@@ -238,6 +238,7 @@ public class CollectionCardDataDumpController {
             @JsonProperty("set_code") String setCode,
             @JsonProperty("set_name_raw") String setNameRaw,
             boolean foil,
+            String language,
             @JsonProperty("source_card_id") Long sourceCardId,
             @JsonProperty("price_old") BigDecimal priceOld,
             @JsonProperty("price_new") BigDecimal priceNew,
@@ -246,7 +247,8 @@ public class CollectionCardDataDumpController {
         static CardMoverResponse from(CollectionCardDataDumpService.CardMover m) {
             return new CardMoverResponse(
                     m.cardName(), m.setCode(), m.setNameRaw(), m.foil(),
-                    m.sourceCardId(), m.priceOld(), m.priceNew(), m.priceDiff());
+                    m.language(), m.sourceCardId(),
+                    m.priceOld(), m.priceNew(), m.priceDiff());
         }
     }
 
