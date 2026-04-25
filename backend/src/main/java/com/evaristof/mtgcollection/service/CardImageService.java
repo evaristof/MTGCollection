@@ -124,10 +124,9 @@ public class CardImageService {
     }
 
     /**
-     * Returns the number of faces for the given card. Single-faced cards return 1,
-     * double-faced cards return 2 (or more for unusual layouts).
+     * Returns image metadata for the given card: face count and layout.
      */
-    public int getFaceCount(Long cardId) {
+    public ImageInfo getImageInfo(Long cardId) {
         CollectionCard card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new java.util.NoSuchElementException(
                         "CollectionCard not found: id=" + cardId));
@@ -136,21 +135,31 @@ public class CardImageService {
         String collectorNumber = card.getCardNumber();
 
         if (setCode == null || setCode.isBlank() || collectorNumber == null || collectorNumber.isBlank()) {
-            return 1;
+            return new ImageInfo(1, "normal");
         }
 
         try {
             ScryfallCard scryfallCard = cardLookupService.getCardBySetAndNumber(setCode, collectorNumber);
+            String layout = scryfallCard.getLayout() != null ? scryfallCard.getLayout() : "normal";
             List<ScryfallCardFace> faces = scryfallCard.getCardFaces();
+            int faceCount = 1;
             if (faces != null && faces.size() > 1
                     && faces.stream().allMatch(f -> f.getImageUris() != null
                             && f.getImageUris().getPng() != null)) {
-                return faces.size();
+                faceCount = faces.size();
             }
+            return new ImageInfo(faceCount, layout);
         } catch (RuntimeException e) {
-            log.warn("Could not determine face count for card #{}: {}", cardId, e.getMessage());
+            log.warn("Could not determine image info for card #{}: {}", cardId, e.getMessage());
         }
-        return 1;
+        return new ImageInfo(1, "normal");
+    }
+
+    public int getFaceCount(Long cardId) {
+        return getImageInfo(cardId).faceCount();
+    }
+
+    public record ImageInfo(int faceCount, String layout) {
     }
 
     /**
