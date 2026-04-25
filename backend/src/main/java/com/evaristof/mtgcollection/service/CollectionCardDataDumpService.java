@@ -161,17 +161,17 @@ public class CollectionCardDataDumpService {
                     diff));
         }
 
-        List<CardMover> gainers = movers.stream()
+        var gainersStream = movers.stream()
                 .filter(m -> m.priceDiff().signum() > 0)
-                .sorted(Comparator.comparing(CardMover::priceDiff).reversed())
-                .limit(limit)
-                .toList();
+                .sorted(Comparator.comparing(CardMover::priceDiff).reversed());
+        if (limit > 0) gainersStream = gainersStream.limit(limit);
+        List<CardMover> gainers = gainersStream.toList();
 
-        List<CardMover> losers = movers.stream()
+        var losersStream = movers.stream()
                 .filter(m -> m.priceDiff().signum() < 0)
-                .sorted(Comparator.comparing(CardMover::priceDiff))
-                .limit(limit)
-                .toList();
+                .sorted(Comparator.comparing(CardMover::priceDiff));
+        if (limit > 0) losersStream = losersStream.limit(limit);
+        List<CardMover> losers = losersStream.toList();
 
         return new PriceMoversResult(oldTs, newTs, gainers, losers);
     }

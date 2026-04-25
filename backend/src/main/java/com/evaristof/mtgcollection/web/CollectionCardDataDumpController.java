@@ -121,9 +121,9 @@ public class CollectionCardDataDumpController {
             @RequestParam(value = "from", required = false) String from,
             @RequestParam(value = "to", required = false) String to,
             @RequestParam(value = "limit", required = false, defaultValue = "100") int limit) {
-        if (limit < 1) {
+        if (limit < 0) {
             return ResponseEntity.badRequest().body(java.util.Map.of(
-                    "message", "limit deve ser >= 1, recebido: " + limit));
+                    "message", "limit deve ser >= 0, recebido: " + limit));
         }
         LocalDateTime parsedFrom = null;
         LocalDateTime parsedTo = null;
