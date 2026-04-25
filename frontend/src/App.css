@@ -94,6 +94,15 @@ body,
   text-overflow: ellipsis;
 }
 
+.sidebar__brand-logo {
+  display: block;
+  margin-top: 0.4rem;
+  width: 100%;
+  max-width: 150px;
+  height: auto;
+  object-fit: contain;
+}
+
 .sidebar__toggle {
   width: 32px;
   height: 32px;
