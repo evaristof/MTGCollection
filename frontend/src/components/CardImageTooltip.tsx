@@ -32,10 +32,11 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
 
   useEffect(() => {
     if (!visible || faceCountFetched.current) return
-    faceCountFetched.current = true
     api.cardImageInfo(cardId).then((info) => {
+      faceCountFetched.current = true
       setFaceCount(info.face_count)
     }).catch(() => {
+      faceCountFetched.current = false
       setFaceCount(1)
     })
   }, [visible, cardId])
