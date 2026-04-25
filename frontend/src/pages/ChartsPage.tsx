@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import * as XLSX from 'xlsx'
 import { api } from '../api/client'
 import type { CardMover, PriceMoversResponse } from '../types/mtg'
 import { CardImageTooltip } from '../components/CardImageTooltip'
@@ -40,6 +41,33 @@ function formatMoney(value: number): string {
     currency: 'USD',
     minimumFractionDigits: 2,
   })
+}
+
+function moversToRows(cards: CardMover[]) {
+  return cards.map((c, i) => ({
+    '#': i + 1,
+    Carta: c.card_name,
+    'Coleção': c.set_name_raw || c.set_code,
+    'Set Code': c.set_code,
+    Foil: c.foil ? 'Sim' : 'Não',
+    Idioma: c.language ?? '',
+    'Preço Anterior (USD)': c.price_old,
+    'Preço Atual (USD)': c.price_new,
+    'Variação (USD)': c.price_diff,
+  }))
+}
+
+function exportMoversToExcel(data: PriceMoversResponse) {
+  const wb = XLSX.utils.book_new()
+
+  const wsGainers = XLSX.utils.json_to_sheet(moversToRows(data.top_gainers))
+  XLSX.utils.book_append_sheet(wb, wsGainers, 'Valorizaram')
+
+  const wsLosers = XLSX.utils.json_to_sheet(moversToRows(data.top_losers))
+  XLSX.utils.book_append_sheet(wb, wsLosers, 'Desvalorizaram')
+
+  const ts = formatTimestamp(data.new_timestamp).replace(/[/:]/g, '-').replace(/\s+/g, '_')
+  XLSX.writeFile(wb, `variacoes_preco_${ts}.xlsx`)
 }
 
 /**
@@ -216,11 +244,28 @@ export default function ChartsPage() {
 
           {movers && (movers.top_gainers.length > 0 || movers.top_losers.length > 0) && (
             <>
-              <h3 style={{ marginTop: 24 }}>
+              <h3 style={{ marginTop: 24, display: 'flex', alignItems: 'center', gap: 8 }}>
                 Maiores variações de preço{' '}
                 <span className="muted" style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
                   ({formatTimestamp(movers.old_timestamp)} → {formatTimestamp(movers.new_timestamp)})
                 </span>
+                <button
+                  type="button"
+                  title="Exportar para Excel"
+                  onClick={() => exportMoversToExcel(movers)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="#1D6F42">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6zM6 20V4h7v5h5v11H6zm2-7.5L10.5 16 8 19.5h1.7l1.8-2.6 1.8 2.6H15L12.5 16 15 12.5h-1.7l-1.8 2.6-1.8-2.6H8z" />
+                  </svg>
+                </button>
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
                 <MoverTable
