@@ -136,7 +136,11 @@ body,
   flex-shrink: 0;
 }
 
-.sidebar__toggle:hover {
+/* :not(:disabled) is necessary so this rule beats the global
+ * `button:hover:not(:disabled)` (specificity 0,2,1). Without it, the
+ * global rule wins and the toggle hover would show the page's blue
+ * accent instead of the sidebar's amber. */
+.sidebar__toggle:hover:not(:disabled) {
   border-color: var(--sb-accent);
   color: var(--sb-accent-strong);
 }
