@@ -26,6 +26,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   const [erroredFaces, setErroredFaces] = useState<Set<number>>(new Set())
   const [zoom, setZoom] = useState(1)
   const tooltipRef = useRef<HTMLDivElement>(null)
+  const wrapperRef = useRef<HTMLSpanElement>(null)
   const faceCountFetched = useRef(false)
   const mousePos = useRef({ x: 0, y: 0 })
 
@@ -74,8 +75,8 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
 
   useEffect(() => {
     if (!visible) return
-    const el = tooltipRef.current
-    if (!el) return
+    const wrapper = wrapperRef.current
+    if (!wrapper) return
     const handler = (e: WheelEvent) => {
       e.preventDefault()
       e.stopPropagation()
@@ -84,8 +85,8 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
         return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev + delta))
       })
     }
-    el.addEventListener('wheel', handler, { passive: false })
-    return () => el.removeEventListener('wheel', handler)
+    wrapper.addEventListener('wheel', handler, { passive: false })
+    return () => wrapper.removeEventListener('wheel', handler)
   }, [visible])
 
   useEffect(() => {
@@ -124,6 +125,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
 
   return (
     <span
+      ref={wrapperRef}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       style={{ cursor: 'pointer' }}
@@ -137,7 +139,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
             left: -9999,
             top: -9999,
             zIndex: 9999,
-            pointerEvents: 'auto',
+            pointerEvents: 'none',
             background: 'var(--bg-alt)',
             border: '1px solid var(--border)',
             borderRadius: 8,
