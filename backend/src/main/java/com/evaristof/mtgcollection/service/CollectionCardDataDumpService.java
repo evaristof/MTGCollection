@@ -136,12 +136,12 @@ public class CollectionCardDataDumpService {
 
         Map<CardKey, CollectionCardDataDump> oldMap = new HashMap<>();
         for (CollectionCardDataDump d : oldRows) {
-            oldMap.put(new CardKey(d.getCardName(), d.getSetCode(), d.isFoil()), d);
+            oldMap.put(new CardKey(d.getCardName(), d.getSetCode(), d.isFoil(), d.getLanguage()), d);
         }
 
         List<CardMover> movers = new ArrayList<>();
         for (CollectionCardDataDump nd : newRows) {
-            CardKey key = new CardKey(nd.getCardName(), nd.getSetCode(), nd.isFoil());
+            CardKey key = new CardKey(nd.getCardName(), nd.getSetCode(), nd.isFoil(), nd.getLanguage());
             CollectionCardDataDump od = oldMap.get(key);
             if (od == null) continue;
 
@@ -176,19 +176,20 @@ public class CollectionCardDataDumpService {
         return new PriceMoversResult(oldTs, newTs, gainers, losers);
     }
 
-    private record CardKey(String cardName, String setCode, boolean foil) {
+    private record CardKey(String cardName, String setCode, boolean foil, String language) {
         @Override
         public boolean equals(Object o) {
             if (this == o) return true;
             if (!(o instanceof CardKey that)) return false;
             return foil == that.foil
                     && Objects.equals(cardName, that.cardName)
-                    && Objects.equals(setCode, that.setCode);
+                    && Objects.equals(setCode, that.setCode)
+                    && Objects.equals(language, that.language);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(cardName, setCode, foil);
+            return Objects.hash(cardName, setCode, foil, language);
         }
     }
 

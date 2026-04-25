@@ -121,6 +121,10 @@ public class CollectionCardDataDumpController {
             @RequestParam(value = "from", required = false) String from,
             @RequestParam(value = "to", required = false) String to,
             @RequestParam(value = "limit", required = false, defaultValue = "10") int limit) {
+        if (limit < 1) {
+            return ResponseEntity.badRequest().body(java.util.Map.of(
+                    "message", "limit deve ser >= 1, recebido: " + limit));
+        }
         LocalDateTime parsedFrom = null;
         LocalDateTime parsedTo = null;
         if (from != null && !from.isBlank()) {
