@@ -142,7 +142,9 @@ public class CardImageService {
         try {
             ScryfallCard scryfallCard = cardLookupService.getCardBySetAndNumber(setCode, collectorNumber);
             List<ScryfallCardFace> faces = scryfallCard.getCardFaces();
-            if (faces != null && faces.size() > 1) {
+            if (faces != null && faces.size() > 1
+                    && faces.stream().allMatch(f -> f.getImageUris() != null
+                            && f.getImageUris().getPng() != null)) {
                 return faces.size();
             }
         } catch (RuntimeException e) {
