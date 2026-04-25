@@ -113,11 +113,17 @@ body,
 
 .sidebar__brand-logo {
   display: block;
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
   width: 100%;
   max-width: 150px;
   height: auto;
   object-fit: contain;
+  /* Painel creme atrás do logo: dá contraste pros traços escuros / vermelhos
+   * do "Magic: The Gathering" sobre o navy da sidebar, sem mexer na arte. */
+  background: #f8f2e1;
+  padding: 8px 10px;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .sidebar__toggle {
