@@ -57,16 +57,26 @@ public class CardImageService {
     }
 
     /**
-     * Returns the PNG image bytes for the given collection-card id.
+     * Returns the PNG image bytes for the given collection-card id (front face).
      * Downloads from Scryfall and caches in MinIO when not yet stored.
+     */
+    public byte[] getCardImage(Long cardId) {
+        return getCardImage(cardId, 0);
+    }
+
+    /**
+     * Returns the PNG image bytes for the given collection-card id and face index.
+     * Face 0 = front (or single face), face 1 = back. Downloads from Scryfall
+     * and caches in MinIO when not yet stored.
      *
-     * @param cardId primary-key of {@link CollectionCard}
+     * @param cardId    primary-key of {@link CollectionCard}
+     * @param faceIndex 0 for front face, 1 for back face
      * @return PNG image bytes
      * @throws java.util.NoSuchElementException if the card id is unknown
      * @throws IllegalStateException if the card lacks enough data to look up
      * @throws RuntimeException on download / storage failures
      */
-    public byte[] getCardImage(Long cardId) {
+    public byte[] getCardImage(Long cardId, int faceIndex) {
         CollectionCard card = cardRepository.findById(cardId)
                 .orElseThrow(() -> new java.util.NoSuchElementException(
                         "CollectionCard not found: id=" + cardId));
@@ -84,8 +94,9 @@ public class CardImageService {
                     "Card #" + cardId + " has no collector_number — cannot look up image");
         }
 
+        String faceSuffix = faceIndex > 0 ? "_face" + faceIndex : "";
         String setName = resolveSetName(setCode);
-        String objectKey = minioStorage.objectKey(setName, setCode, collectorNumber, cardName);
+        String objectKey = minioStorage.objectKey(setName, setCode, collectorNumber, cardName + faceSuffix);
 
         if (minioStorage.exists(objectKey)) {
             log.debug("Image cache hit for '{}'", objectKey);
@@ -95,11 +106,11 @@ public class CardImageService {
         log.info("Image cache miss for '{}' — downloading from Scryfall", objectKey);
 
         ScryfallCard scryfallCard = cardLookupService.getCardBySetAndNumber(setCode, collectorNumber);
-        String pngUrl = resolvePngUrl(scryfallCard);
+        String pngUrl = resolvePngUrl(scryfallCard, faceIndex);
         if (pngUrl == null) {
             throw new IllegalStateException(
                     "Scryfall returned no PNG image URL for set=" + setCode
-                            + " number=" + collectorNumber);
+                            + " number=" + collectorNumber + " face=" + faceIndex);
         }
 
         byte[] imageBytes = downloadImage(pngUrl);
@@ -113,16 +124,55 @@ public class CardImageService {
     }
 
     /**
-     * Resolves the PNG URL from the Scryfall card, handling both single-faced
-     * and multi-faced cards (transform, modal DFC, flip, meld, etc.).
-     * For multi-faced cards, the front face (index 0) image is used.
+     * Returns the number of faces for the given card. Single-faced cards return 1,
+     * double-faced cards return 2 (or more for unusual layouts).
      */
-    private String resolvePngUrl(ScryfallCard scryfallCard) {
+    public int getFaceCount(Long cardId) {
+        CollectionCard card = cardRepository.findById(cardId)
+                .orElseThrow(() -> new java.util.NoSuchElementException(
+                        "CollectionCard not found: id=" + cardId));
+
+        String setCode = card.getSetCode();
+        String collectorNumber = card.getCardNumber();
+
+        if (setCode == null || setCode.isBlank() || collectorNumber == null || collectorNumber.isBlank()) {
+            return 1;
+        }
+
+        try {
+            ScryfallCard scryfallCard = cardLookupService.getCardBySetAndNumber(setCode, collectorNumber);
+            List<ScryfallCardFace> faces = scryfallCard.getCardFaces();
+            if (faces != null && faces.size() > 1) {
+                return faces.size();
+            }
+        } catch (RuntimeException e) {
+            log.warn("Could not determine face count for card #{}: {}", cardId, e.getMessage());
+        }
+        return 1;
+    }
+
+    /**
+     * Resolves the PNG URL from the Scryfall card for the given face index.
+     * For single-faced cards or face index 0, tries top-level image_uris first,
+     * then falls back to card_faces[0]. For face index 1+, uses card_faces directly.
+     */
+    private String resolvePngUrl(ScryfallCard scryfallCard, int faceIndex) {
+        List<ScryfallCardFace> faces = scryfallCard.getCardFaces();
+
+        if (faceIndex > 0) {
+            if (faces != null && faces.size() > faceIndex) {
+                ScryfallImageUris faceUris = faces.get(faceIndex).getImageUris();
+                if (faceUris != null && faceUris.getPng() != null) {
+                    return faceUris.getPng();
+                }
+            }
+            return null;
+        }
+
         ScryfallImageUris topLevel = scryfallCard.getImageUris();
         if (topLevel != null && topLevel.getPng() != null) {
             return topLevel.getPng();
         }
-        List<ScryfallCardFace> faces = scryfallCard.getCardFaces();
         if (faces != null && !faces.isEmpty()) {
             ScryfallImageUris faceUris = faces.get(0).getImageUris();
             if (faceUris != null && faceUris.getPng() != null) {
