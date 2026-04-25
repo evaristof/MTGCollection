@@ -2,6 +2,8 @@ package com.evaristof.mtgcollection.scryfall.dto;
 
 import com.google.gson.annotations.SerializedName;
 
+import java.util.List;
+
 /**
  * DTO for a Scryfall Card. Only the fields relevant to the current
  * use cases (pricing) are mapped; Scryfall returns many more fields.
@@ -43,6 +45,9 @@ public class ScryfallCard {
 
     @SerializedName("image_uris")
     private ScryfallImageUris imageUris;
+
+    @SerializedName("card_faces")
+    private List<ScryfallCardFace> cardFaces;
 
     public ScryfallCard() {
     }
@@ -141,5 +146,13 @@ public class ScryfallCard {
 
     public void setImageUris(ScryfallImageUris imageUris) {
         this.imageUris = imageUris;
+    }
+
+    public List<ScryfallCardFace> getCardFaces() {
+        return cardFaces;
+    }
+
+    public void setCardFaces(List<ScryfallCardFace> cardFaces) {
+        this.cardFaces = cardFaces;
     }
 }

@@ -5,6 +5,7 @@ import com.evaristof.mtgcollection.domain.MagicSet;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.repository.MagicSetRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
+import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardFace;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallImageUris;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +17,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * On-demand card-image service.
@@ -93,14 +95,14 @@ public class CardImageService {
         log.info("Image cache miss for '{}' — downloading from Scryfall", objectKey);
 
         ScryfallCard scryfallCard = cardLookupService.getCardBySetAndNumber(setCode, collectorNumber);
-        ScryfallImageUris uris = scryfallCard.getImageUris();
-        if (uris == null || uris.getPng() == null) {
+        String pngUrl = resolvePngUrl(scryfallCard);
+        if (pngUrl == null) {
             throw new IllegalStateException(
                     "Scryfall returned no PNG image URL for set=" + setCode
                             + " number=" + collectorNumber);
         }
 
-        byte[] imageBytes = downloadImage(uris.getPng());
+        byte[] imageBytes = downloadImage(pngUrl);
         try {
             minioStorage.upload(objectKey, imageBytes);
         } catch (RuntimeException e) {
@@ -108,6 +110,26 @@ public class CardImageService {
                     objectKey, e.getMessage());
         }
         return imageBytes;
+    }
+
+    /**
+     * Resolves the PNG URL from the Scryfall card, handling both single-faced
+     * and multi-faced cards (transform, modal DFC, flip, meld, etc.).
+     * For multi-faced cards, the front face (index 0) image is used.
+     */
+    private String resolvePngUrl(ScryfallCard scryfallCard) {
+        ScryfallImageUris topLevel = scryfallCard.getImageUris();
+        if (topLevel != null && topLevel.getPng() != null) {
+            return topLevel.getPng();
+        }
+        List<ScryfallCardFace> faces = scryfallCard.getCardFaces();
+        if (faces != null && !faces.isEmpty()) {
+            ScryfallImageUris faceUris = faces.get(0).getImageUris();
+            if (faceUris != null && faceUris.getPng() != null) {
+                return faceUris.getPng();
+            }
+        }
+        return null;
     }
 
     private String resolveSetName(String setCode) {
