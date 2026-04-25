@@ -1,16 +1,21 @@
 :root {
-  /* Dark slate palette — softer than pure black for long reading sessions. */
-  --bg: #1b1f27;
-  --bg-alt: #232834;
-  --bg-raised: #2a3040;
-  --border: #374052;
-  --border-strong: #48526a;
-  --fg: #e8edf5;
-  --fg-soft: #c0c8d6;
-  --muted: #8b94a7;
-  --accent: #7c9cff;
-  --accent-strong: #9fb6ff;
-  --danger: #ff8a8a;
+  /* Light "Papel" palette — fundo claro com acento azul-cobalto.
+   * Os RGBs abaixo (--accent-rgb / --danger-rgb) existem para overlays
+   * em rgba() ao longo do CSS. */
+  --bg: #ffffff;
+  --bg-alt: #f5f6f8;
+  --bg-raised: #ffffff;
+  --border: #d8dde6;
+  --border-strong: #b9c0cd;
+  --fg: #1f2430;
+  --fg-soft: #3a4252;
+  --muted: #6b7384;
+  --accent: #2b6cb0;
+  --accent-strong: #1e4e85;
+  --accent-rgb: 43, 108, 176;
+  --accent-fg: #ffffff;
+  --danger: #c53030;
+  --danger-rgb: 197, 48, 48;
   --sidebar-width: 230px;
   --sidebar-width-collapsed: 64px;
 }
@@ -132,14 +137,14 @@ body,
 }
 
 .sidebar__nav a:hover {
-  background: rgba(125, 173, 255, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
   color: var(--fg);
 }
 
 .sidebar__nav a.active {
-  background: rgba(125, 173, 255, 0.16);
+  background: rgba(var(--accent-rgb), 0.14);
   color: var(--accent-strong);
-  border-color: rgba(125, 173, 255, 0.35);
+  border-color: rgba(var(--accent-rgb), 0.35);
 }
 
 .sidebar__icon {
@@ -247,14 +252,14 @@ button:hover:not(:disabled) {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #111624;
+  color: var(--accent-fg);
   font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
-  color: #111624;
+  color: var(--accent-fg);
 }
 
 button:disabled {
@@ -263,12 +268,12 @@ button:disabled {
 }
 
 button.danger {
-  border-color: rgba(255, 128, 128, 0.45);
+  border-color: rgba(var(--danger-rgb), 0.45);
   color: var(--danger);
 }
 
 button.danger:hover:not(:disabled) {
-  background: rgba(255, 128, 128, 0.12);
+  background: rgba(var(--danger-rgb), 0.10);
   border-color: var(--danger);
   color: var(--danger);
 }
@@ -368,11 +373,11 @@ thead th {
 }
 
 tbody tr:hover {
-  background: rgba(125, 173, 255, 0.05);
+  background: rgba(var(--accent-rgb), 0.07);
 }
 
 code {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.06);
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
   font-size: 0.85em;
@@ -385,10 +390,10 @@ code {
 
 .error {
   color: var(--danger);
-  background: rgba(255, 128, 128, 0.1);
+  background: rgba(var(--danger-rgb), 0.08);
   padding: 0.6rem 0.85rem;
   border-radius: 6px;
-  border: 1px solid rgba(255, 128, 128, 0.4);
+  border: 1px solid rgba(var(--danger-rgb), 0.35);
   font-weight: 500;
 }
 
@@ -511,7 +516,7 @@ label.inline {
 }
 
 .combo__option--active {
-  background: rgba(125, 173, 255, 0.12);
+  background: rgba(var(--accent-rgb), 0.12);
 }
 
 .combo__option--selected {
@@ -553,7 +558,7 @@ thead th[aria-sort] {
 
 .sort-th:hover {
   color: var(--accent-strong);
-  background: rgba(125, 173, 255, 0.08);
+  background: rgba(var(--accent-rgb), 0.08);
 }
 
 .sort-th:focus-visible {
