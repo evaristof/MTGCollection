@@ -169,10 +169,11 @@ export const api = {
       `/api/collection/datadumps/stats/total-value${suffix}`,
     )
   },
-  dumpPriceMovers: (params: { from?: string; to?: string }): Promise<PriceMoversResponse | undefined> => {
+  dumpPriceMovers: (params: { from?: string; to?: string; limit?: number }): Promise<PriceMoversResponse | undefined> => {
     const qs = new URLSearchParams()
     if (params.from) qs.set('from', params.from)
     if (params.to) qs.set('to', params.to)
+    if (params.limit != null) qs.set('limit', String(params.limit))
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
     return request<PriceMoversResponse>(
       `/api/collection/datadumps/stats/price-movers${suffix}`,

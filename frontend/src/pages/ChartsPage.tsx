@@ -57,7 +57,7 @@ function moversToRows(cards: CardMover[]) {
   }))
 }
 
-function exportMoversToExcel(data: PriceMoversResponse) {
+function writeMoversWorkbook(data: PriceMoversResponse) {
   const wb = XLSX.utils.book_new()
 
   const wsGainers = XLSX.utils.json_to_sheet(moversToRows(data.top_gainers))
@@ -83,6 +83,7 @@ export default function ChartsPage() {
   const [error, setError] = useState<string | null>(null)
   const [points, setPoints] = useState<DumpTotalPoint[]>([])
   const [movers, setMovers] = useState<PriceMoversResponse | null | undefined>(null)
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -107,6 +108,21 @@ export default function ChartsPage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoading(false)
+    }
+  }, [from, to])
+
+  const handleExport = useCallback(async () => {
+    setExporting(true)
+    try {
+      const params = { from: from.trim() || undefined, to: to.trim() || undefined, limit: 0 }
+      const allMovers = await api.dumpPriceMovers(params)
+      if (allMovers) {
+        writeMoversWorkbook(allMovers)
+      }
+    } catch (e) {
+      console.error('Export failed:', e)
+    } finally {
+      setExporting(false)
     }
   }, [from, to])
 
@@ -251,15 +267,17 @@ export default function ChartsPage() {
                 </span>
                 <button
                   type="button"
-                  title="Exportar para Excel"
-                  onClick={() => exportMoversToExcel(movers)}
+                  title="Exportar todas as variações para Excel"
+                  disabled={exporting}
+                  onClick={() => void handleExport()}
                   style={{
                     background: 'none',
                     border: 'none',
-                    cursor: 'pointer',
+                    cursor: exporting ? 'wait' : 'pointer',
                     padding: 4,
                     display: 'inline-flex',
                     alignItems: 'center',
+                    opacity: exporting ? 0.5 : 1,
                   }}
                 >
                   <svg width="22" height="22" viewBox="0 0 24 24" fill="#1D6F42">
