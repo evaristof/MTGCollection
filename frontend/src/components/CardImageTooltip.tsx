@@ -12,6 +12,7 @@ const DUAL_WIDTH = 270
 const ZOOM_STEP = 0.1
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 2.5
+const CARD_ASPECT = 7 / 5
 
 /**
  * Shows the card image in a floating tooltip anchored to the mouse pointer.
@@ -25,6 +26,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   const [loadedFaces, setLoadedFaces] = useState<Set<number>>(new Set())
   const [erroredFaces, setErroredFaces] = useState<Set<number>>(new Set())
   const [zoom, setZoom] = useState(1)
+  const [layout, setLayout] = useState('normal')
   const tooltipRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLSpanElement>(null)
   const faceCountFetched = useRef(false)
@@ -94,9 +96,11 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     api.cardImageInfo(cardId).then((info) => {
       faceCountFetched.current = true
       setFaceCount(info.face_count)
+      setLayout(info.layout)
     }).catch(() => {
       faceCountFetched.current = false
       setFaceCount(1)
+      setLayout('normal')
     })
   }, [visible, cardId])
 
@@ -119,9 +123,13 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     setErroredFaces((prev) => new Set(prev).add(face))
   }
 
+  const isSplit = layout === 'split'
   const isDoubleFaced = faceCount > 1
   const baseWidth = isDoubleFaced ? DUAL_WIDTH : SINGLE_WIDTH
   const imgWidth = Math.round(baseWidth * zoom)
+  const imgHeight = Math.round(imgWidth * CARD_ASPECT)
+  const rotatedW = isSplit ? imgHeight : imgWidth
+  const rotatedH = isSplit ? imgWidth : imgHeight
 
   return (
     <span
@@ -150,7 +158,15 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
           }}
         >
           {Array.from({ length: faceCount }, (_, i) => (
-            <div key={i} style={{ position: 'relative' }}>
+            <div
+              key={i}
+              style={{
+                position: 'relative',
+                width: rotatedW,
+                height: rotatedH,
+                overflow: 'hidden',
+              }}
+            >
               {!loadedFaces.has(i) && !erroredFaces.has(i) && (
                 <div
                   style={{
@@ -183,6 +199,13 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
                   width: imgWidth,
                   borderRadius: 6,
                   transition: 'width 0.1s ease-out',
+                  ...(isSplit ? {
+                    transform: 'rotate(90deg)',
+                    transformOrigin: 'top left',
+                    position: 'absolute',
+                    top: 0,
+                    left: imgHeight,
+                  } : {}),
                 }}
               />
             </div>

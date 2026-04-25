@@ -59,8 +59,8 @@ public class CardImageController {
     @GetMapping("/{id}/image/info")
     public ResponseEntity<?> getImageInfo(@PathVariable("id") Long id) {
         try {
-            int faceCount = cardImageService.getFaceCount(id);
-            return ResponseEntity.ok(Map.of("face_count", faceCount));
+            var info = cardImageService.getImageInfo(id);
+            return ResponseEntity.ok(Map.of("face_count", info.faceCount(), "layout", info.layout()));
         } catch (java.util.NoSuchElementException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("message", e.getMessage()));

@@ -46,6 +46,9 @@ public class ScryfallCard {
     @SerializedName("image_uris")
     private ScryfallImageUris imageUris;
 
+    @SerializedName("layout")
+    private String layout;
+
     @SerializedName("card_faces")
     private List<ScryfallCardFace> cardFaces;
 
@@ -146,6 +149,14 @@ public class ScryfallCard {
 
     public void setImageUris(ScryfallImageUris imageUris) {
         this.imageUris = imageUris;
+    }
+
+    public String getLayout() {
+        return layout;
+    }
+
+    public void setLayout(String layout) {
+        this.layout = layout;
     }
 
     public List<ScryfallCardFace> getCardFaces() {
