@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../api/client'
 
 interface Props {
@@ -9,49 +9,83 @@ interface Props {
 const MARGIN = 12
 const SINGLE_WIDTH = 340
 const DUAL_WIDTH = 270
+const ZOOM_STEP = 0.1
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2.5
 
 /**
  * Shows the card image in a floating tooltip anchored to the mouse pointer.
  * For double-faced cards, both faces are displayed side by side.
  * Repositions automatically to avoid being clipped by viewport edges.
+ * Scroll the mouse wheel to zoom in/out.
  */
 export function CardImageTooltip({ cardId, cardName }: Props) {
   const [visible, setVisible] = useState(false)
   const [faceCount, setFaceCount] = useState(1)
   const [loadedFaces, setLoadedFaces] = useState<Set<number>>(new Set())
   const [erroredFaces, setErroredFaces] = useState<Set<number>>(new Set())
+  const [zoom, setZoom] = useState(1)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const faceCountFetched = useRef(false)
+  const mousePos = useRef({ x: 0, y: 0 })
+
+  const repositionTooltip = useCallback(() => {
+    const el = tooltipRef.current
+    if (!el) return
+
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const tw = el.offsetWidth
+    const th = el.offsetHeight
+    const mx = mousePos.current.x
+    const my = mousePos.current.y
+
+    let x = mx + MARGIN
+    let y = my + MARGIN
+
+    if (x + tw > vw - MARGIN) {
+      x = mx - tw - MARGIN
+    }
+    if (y + th > vh - MARGIN) {
+      y = my - th - MARGIN
+    }
+
+    x = Math.max(MARGIN, x)
+    y = Math.max(MARGIN, y)
+
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
+  }, [])
 
   useEffect(() => {
     if (!visible) return
     const handler = (e: MouseEvent) => {
-      const el = tooltipRef.current
-      if (!el) return
-
-      const vw = window.innerWidth
-      const vh = window.innerHeight
-      const tw = el.offsetWidth
-      const th = el.offsetHeight
-
-      let x = e.clientX + MARGIN
-      let y = e.clientY + MARGIN
-
-      if (x + tw > vw - MARGIN) {
-        x = e.clientX - tw - MARGIN
-      }
-      if (y + th > vh - MARGIN) {
-        y = e.clientY - th - MARGIN
-      }
-
-      x = Math.max(MARGIN, x)
-      y = Math.max(MARGIN, y)
-
-      el.style.left = `${x}px`
-      el.style.top = `${y}px`
+      mousePos.current = { x: e.clientX, y: e.clientY }
+      repositionTooltip()
     }
     document.addEventListener('mousemove', handler)
     return () => document.removeEventListener('mousemove', handler)
+  }, [visible, repositionTooltip])
+
+  useEffect(() => {
+    if (!visible) return
+    repositionTooltip()
+  }, [visible, zoom, repositionTooltip])
+
+  useEffect(() => {
+    if (!visible) return
+    const el = tooltipRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setZoom((prev) => {
+        const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP
+        return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, prev + delta))
+      })
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
   }, [visible])
 
   useEffect(() => {
@@ -69,6 +103,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     setVisible(true)
     setLoadedFaces(new Set())
     setErroredFaces(new Set())
+    setZoom(1)
   }
 
   const onLeave = () => {
@@ -84,7 +119,8 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   }
 
   const isDoubleFaced = faceCount > 1
-  const imgWidth = isDoubleFaced ? DUAL_WIDTH : SINGLE_WIDTH
+  const baseWidth = isDoubleFaced ? DUAL_WIDTH : SINGLE_WIDTH
+  const imgWidth = Math.round(baseWidth * zoom)
 
   return (
     <span
@@ -101,7 +137,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
             left: -9999,
             top: -9999,
             zIndex: 9999,
-            pointerEvents: 'none',
+            pointerEvents: 'auto',
             background: 'var(--bg-alt)',
             border: '1px solid var(--border)',
             borderRadius: 8,
@@ -144,6 +180,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
                   display: loadedFaces.has(i) && !erroredFaces.has(i) ? 'block' : 'none',
                   width: imgWidth,
                   borderRadius: 6,
+                  transition: 'width 0.1s ease-out',
                 }}
               />
             </div>
