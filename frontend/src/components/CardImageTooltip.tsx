@@ -8,13 +8,15 @@ interface Props {
 
 /**
  * Shows the card image in a floating tooltip anchored to the mouse pointer.
- * The image URL triggers the backend on-demand fetch (Scryfall → MinIO cache).
+ * For double-faced cards, both faces are displayed side by side.
  */
 export function CardImageTooltip({ cardId, cardName }: Props) {
   const [visible, setVisible] = useState(false)
-  const [loaded, setLoaded] = useState(false)
-  const [errored, setErrored] = useState(false)
+  const [faceCount, setFaceCount] = useState(1)
+  const [loadedFaces, setLoadedFaces] = useState<Set<number>>(new Set())
+  const [erroredFaces, setErroredFaces] = useState<Set<number>>(new Set())
   const tooltipRef = useRef<HTMLDivElement>(null)
+  const faceCountFetched = useRef(false)
 
   useEffect(() => {
     if (!visible) return
@@ -28,17 +30,36 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     return () => document.removeEventListener('mousemove', handler)
   }, [visible])
 
+  useEffect(() => {
+    if (!visible || faceCountFetched.current) return
+    faceCountFetched.current = true
+    api.cardImageInfo(cardId).then((info) => {
+      setFaceCount(info.face_count)
+    }).catch(() => {
+      setFaceCount(1)
+    })
+  }, [visible, cardId])
+
   const onEnter = () => {
     setVisible(true)
-    setLoaded(false)
-    setErrored(false)
+    setLoadedFaces(new Set())
+    setErroredFaces(new Set())
   }
 
   const onLeave = () => {
     setVisible(false)
   }
 
-  const imgUrl = api.cardImageUrl(cardId)
+  const onFaceLoad = (face: number) => {
+    setLoadedFaces((prev) => new Set(prev).add(face))
+  }
+
+  const onFaceError = (face: number) => {
+    setErroredFaces((prev) => new Set(prev).add(face))
+  }
+
+  const isDoubleFaced = faceCount > 1
+  const imgWidth = isDoubleFaced ? 200 : 250
 
   return (
     <span
@@ -61,42 +82,47 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
             borderRadius: 8,
             boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
             padding: 4,
-            maxWidth: 260,
+            display: 'flex',
+            gap: 4,
           }}
         >
-          {!loaded && !errored && (
-            <div
-              style={{
-                color: 'var(--muted)',
-                padding: '24px 16px',
-                fontSize: 13,
-              }}
-            >
-              Carregando…
+          {Array.from({ length: faceCount }, (_, i) => (
+            <div key={i} style={{ position: 'relative' }}>
+              {!loadedFaces.has(i) && !erroredFaces.has(i) && (
+                <div
+                  style={{
+                    color: 'var(--muted)',
+                    padding: '24px 16px',
+                    fontSize: 13,
+                  }}
+                >
+                  Carregando…
+                </div>
+              )}
+              {erroredFaces.has(i) && (
+                <div
+                  style={{
+                    color: 'var(--danger)',
+                    padding: '24px 16px',
+                    fontSize: 13,
+                  }}
+                >
+                  Imagem indisponível
+                </div>
+              )}
+              <img
+                src={api.cardImageUrl(cardId, i)}
+                alt={`${cardName}${isDoubleFaced ? ` (face ${i + 1})` : ''}`}
+                onLoad={() => onFaceLoad(i)}
+                onError={() => onFaceError(i)}
+                style={{
+                  display: loadedFaces.has(i) && !erroredFaces.has(i) ? 'block' : 'none',
+                  width: imgWidth,
+                  borderRadius: 6,
+                }}
+              />
             </div>
-          )}
-          {errored && (
-            <div
-              style={{
-                color: 'var(--danger)',
-                padding: '24px 16px',
-                fontSize: 13,
-              }}
-            >
-              Imagem indisponível
-            </div>
-          )}
-          <img
-            src={imgUrl}
-            alt={cardName}
-            onLoad={() => setLoaded(true)}
-            onError={() => setErrored(true)}
-            style={{
-              display: loaded && !errored ? 'block' : 'none',
-              width: 250,
-              borderRadius: 6,
-            }}
-          />
+          ))}
         </div>
       )}
     </span>

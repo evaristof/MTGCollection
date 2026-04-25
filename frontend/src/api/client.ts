@@ -193,8 +193,10 @@ export const api = {
     `${API_BASE_URL}/api/collection/import/${encodeURIComponent(jobId)}/download`,
 
   // Card images
-  cardImageUrl: (id: number) =>
-    `${API_BASE_URL}/api/collection/cards/${id}/image`,
+  cardImageUrl: (id: number, face = 0) =>
+    `${API_BASE_URL}/api/collection/cards/${id}/image?face=${face}`,
+  cardImageInfo: (id: number) =>
+    request<{ face_count: number }>(`/api/collection/cards/${id}/image/info`),
 
   // Prices
   priceByName: (name: string, set: string, foil: boolean) =>
