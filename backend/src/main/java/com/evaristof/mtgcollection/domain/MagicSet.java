@@ -41,6 +41,9 @@ public class MagicSet {
     @Column(name = "BLOCK_NAME")
     private String blockName;
 
+    @Column(name = "ICON_SVG_URI")
+    private String iconSvgUri;
+
     public MagicSet() {
     }
 
@@ -118,6 +121,14 @@ public class MagicSet {
 
     public void setBlockName(String blockName) {
         this.blockName = blockName;
+    }
+
+    public String getIconSvgUri() {
+        return iconSvgUri;
+    }
+
+    public void setIconSvgUri(String iconSvgUri) {
+        this.iconSvgUri = iconSvgUri;
     }
 
     @Override

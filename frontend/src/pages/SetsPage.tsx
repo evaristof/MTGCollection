@@ -4,6 +4,7 @@ import type { MagicSet } from '../types/mtg'
 import { useTableControls } from '../hooks/useTableControls'
 import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
+import { SetIcon } from '../components/SetIcon'
 
 type FormState = SetInput & { _editingCode?: string | null }
 
@@ -331,6 +332,7 @@ export default function SetsPage() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 40 }}>Icon</th>
                   <SortableTh<MagicSet> label="Code" field="set_code" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <SortableTh<MagicSet> label="Name" field="set_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
                   <SortableTh<MagicSet> label="Released" field="release_date" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
@@ -345,6 +347,9 @@ export default function SetsPage() {
               <tbody>
                 {pageRows.map((s) => (
                   <tr key={s.set_code}>
+                    <td style={{ textAlign: 'center' }}>
+                      <SetIcon setCode={s.set_code} setName={s.set_name} />
+                    </td>
                     <td><code>{s.set_code}</code></td>
                     <td>{s.set_name}</td>
                     <td>{s.release_date ?? '-'}</td>

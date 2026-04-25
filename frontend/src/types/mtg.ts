@@ -28,6 +28,7 @@ export interface MagicSet {
   printed_size?: number | null
   block_code?: string | null
   block_name?: string | null
+  icon_svg_uri?: string | null
 }
 
 /**
