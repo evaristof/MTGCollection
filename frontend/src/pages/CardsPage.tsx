@@ -6,6 +6,7 @@ import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
 import { SetCombo } from '../components/SetCombo'
 import { ImportCollectionDialog } from '../components/ImportCollectionDialog'
+import { CardImageTooltip } from '../components/CardImageTooltip'
 
 type AddFormState = AddCardInput
 type EditFormState = {
@@ -781,7 +782,9 @@ export default function CardsPage() {
                     </td>
                     <td>{c.id}</td>
                     <td>{c.card_number}</td>
-                    <td>{c.card_name}</td>
+                    <td>
+                      <CardImageTooltip cardId={c.id} cardName={c.card_name} />
+                    </td>
                     <td title={c.set_code}>{getSetName(c.set_code)}</td>
                     <td>{c.card_type ?? '-'}</td>
                     <td>{c.foil ? '✦' : '—'}</td>

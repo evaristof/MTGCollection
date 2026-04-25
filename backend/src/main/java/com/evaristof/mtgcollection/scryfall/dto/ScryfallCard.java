@@ -41,6 +41,9 @@ public class ScryfallCard {
     @SerializedName("prices")
     private ScryfallPrices prices;
 
+    @SerializedName("image_uris")
+    private ScryfallImageUris imageUris;
+
     public ScryfallCard() {
     }
 
@@ -130,5 +133,13 @@ public class ScryfallCard {
 
     public void setPrices(ScryfallPrices prices) {
         this.prices = prices;
+    }
+
+    public ScryfallImageUris getImageUris() {
+        return imageUris;
+    }
+
+    public void setImageUris(ScryfallImageUris imageUris) {
+        this.imageUris = imageUris;
     }
 }
