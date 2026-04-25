@@ -101,7 +101,12 @@ public class CardImageService {
         }
 
         byte[] imageBytes = downloadImage(uris.getPng());
-        minioStorage.upload(objectKey, imageBytes);
+        try {
+            minioStorage.upload(objectKey, imageBytes);
+        } catch (RuntimeException e) {
+            log.warn("MinIO upload failed for '{}' — returning image without caching: {}",
+                    objectKey, e.getMessage());
+        }
         return imageBytes;
     }
 
