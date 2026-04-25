@@ -275,7 +275,7 @@ function MoverTable({
           </thead>
           <tbody>
             {cards.map((c, i) => (
-              <tr key={`${c.card_name}-${c.set_code}-${c.foil}`}>
+              <tr key={c.source_card_id != null ? c.source_card_id : `${c.card_name}-${c.set_code}-${c.foil}-${i}`}>
                 <td>{i + 1}</td>
                 <td>
                   {c.source_card_id != null ? (
