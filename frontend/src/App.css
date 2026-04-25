@@ -47,9 +47,25 @@ body,
 
 /* ---------- Sidebar ---------- */
 
+/* Sidebar tem seu próprio tema (Navy / Azul-marinho), independente do
+ * resto da app que continua claro. Variáveis abaixo só valem dentro
+ * da .sidebar. Quem quiser trocar a paleta do menu mexe só aqui. */
 .sidebar {
-  background: var(--bg-alt);
-  border-right: 1px solid var(--border);
+  --sb-bg: #182645;
+  --sb-fg: #e6ecf7;
+  --sb-fg-soft: #b9c5da;
+  --sb-muted: #7d89a3;
+  --sb-border: #233358;
+  --sb-raised: #1f3057;
+  --sb-accent: #ffb454;
+  --sb-accent-strong: #ffc987;
+  --sb-active-bg: rgba(255, 180, 84, 0.18);
+  --sb-active-border: rgba(255, 180, 84, 0.4);
+  --sb-hover-bg: rgba(255, 255, 255, 0.06);
+
+  background: var(--sb-bg);
+  color: var(--sb-fg);
+  border-right: 1px solid var(--sb-border);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -65,7 +81,7 @@ body,
   justify-content: space-between;
   gap: 0.5rem;
   padding: 1rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--sb-border);
   min-height: 64px;
 }
 
@@ -82,12 +98,13 @@ body,
 }
 
 .sidebar__brand strong {
-  color: var(--fg);
+  color: var(--sb-fg);
   font-size: 1rem;
   letter-spacing: 0.01em;
 }
 
 .sidebar__brand .muted {
+  color: var(--sb-muted);
   font-size: 0.72rem;
   white-space: nowrap;
   overflow: hidden;
@@ -111,17 +128,21 @@ body,
   justify-content: center;
   padding: 0;
   border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  color: var(--fg-soft);
+  border: 1px solid var(--sb-border);
+  background: var(--sb-raised);
+  color: var(--sb-fg-soft);
   cursor: pointer;
   font-size: 0.9rem;
   flex-shrink: 0;
 }
 
-.sidebar__toggle:hover {
-  border-color: var(--accent);
-  color: var(--accent-strong);
+/* :not(:disabled) is necessary so this rule beats the global
+ * `button:hover:not(:disabled)` (specificity 0,2,1). Without it, the
+ * global rule wins and the toggle hover would show the page's blue
+ * accent instead of the sidebar's amber. */
+.sidebar__toggle:hover:not(:disabled) {
+  border-color: var(--sb-accent);
+  color: var(--sb-accent-strong);
 }
 
 .sidebar__nav {
@@ -137,7 +158,7 @@ body,
   gap: 0.75rem;
   padding: 0.55rem 0.8rem;
   border-radius: 6px;
-  color: var(--fg-soft);
+  color: var(--sb-fg-soft);
   text-decoration: none;
   font-weight: 500;
   border: 1px solid transparent;
@@ -146,14 +167,14 @@ body,
 }
 
 .sidebar__nav a:hover {
-  background: rgba(var(--accent-rgb), 0.08);
-  color: var(--fg);
+  background: var(--sb-hover-bg);
+  color: var(--sb-fg);
 }
 
 .sidebar__nav a.active {
-  background: rgba(var(--accent-rgb), 0.14);
-  color: var(--accent-strong);
-  border-color: rgba(var(--accent-rgb), 0.35);
+  background: var(--sb-active-bg);
+  color: var(--sb-accent-strong);
+  border-color: var(--sb-active-border);
 }
 
 .sidebar__icon {
