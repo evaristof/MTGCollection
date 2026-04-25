@@ -21,7 +21,11 @@ function App() {
           {!collapsed && (
             <div className="sidebar__brand">
               <strong>MTGCollection</strong>
-              <span className="muted">Magic: The Gathering</span>
+              <img
+                src="/mtg-logo.png"
+                alt="Magic: The Gathering"
+                className="sidebar__brand-logo"
+              />
             </div>
           )}
           <button
