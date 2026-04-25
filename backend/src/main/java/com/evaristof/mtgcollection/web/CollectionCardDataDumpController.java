@@ -108,6 +108,43 @@ public class CollectionCardDataDumpController {
         return ResponseEntity.ok(rows.stream().map(DumpTotalResponse::from).toList());
     }
 
+    /**
+     * Top-N cards that appreciated and depreciated the most between the two
+     * most recent snapshots within {@code [from, to]}. Feeds the "movers"
+     * tables on the Gráficos page.
+     *
+     * <p>Returns {@code 204 No Content} when fewer than two dumps exist in
+     * the range (nothing to compare).</p>
+     */
+    @GetMapping("/stats/price-movers")
+    public ResponseEntity<?> priceMovers(
+            @RequestParam(value = "from", required = false) String from,
+            @RequestParam(value = "to", required = false) String to,
+            @RequestParam(value = "limit", required = false, defaultValue = "10") int limit) {
+        LocalDateTime parsedFrom = null;
+        LocalDateTime parsedTo = null;
+        if (from != null && !from.isBlank()) {
+            parsedFrom = tryParse(from);
+            if (parsedFrom == null) {
+                return ResponseEntity.badRequest().body(java.util.Map.of(
+                        "message", "from inválido: " + from));
+            }
+        }
+        if (to != null && !to.isBlank()) {
+            parsedTo = tryParse(to);
+            if (parsedTo == null) {
+                return ResponseEntity.badRequest().body(java.util.Map.of(
+                        "message", "to inválido: " + to));
+            }
+        }
+        CollectionCardDataDumpService.PriceMoversResult result =
+                service.priceMovers(parsedFrom, parsedTo, limit);
+        if (result == null) {
+            return ResponseEntity.noContent().build();
+        }
+        return ResponseEntity.ok(new PriceMoversResponse(result));
+    }
+
     @DeleteMapping("/{timestamp}")
     public ResponseEntity<?> delete(@PathVariable("timestamp") String timestamp) {
         LocalDateTime parsed = tryParse(timestamp);
@@ -188,6 +225,38 @@ public class CollectionCardDataDumpController {
                     d.getPrice(),
                     d.getComentario(),
                     d.getLocalizacao());
+        }
+    }
+
+    /** Single card entry in the price-movers response. */
+    public record CardMoverResponse(
+            @JsonProperty("card_name") String cardName,
+            @JsonProperty("set_code") String setCode,
+            @JsonProperty("set_name_raw") String setNameRaw,
+            boolean foil,
+            @JsonProperty("source_card_id") Long sourceCardId,
+            @JsonProperty("price_old") BigDecimal priceOld,
+            @JsonProperty("price_new") BigDecimal priceNew,
+            @JsonProperty("price_diff") BigDecimal priceDiff) {
+
+        static CardMoverResponse from(CollectionCardDataDumpService.CardMover m) {
+            return new CardMoverResponse(
+                    m.cardName(), m.setCode(), m.setNameRaw(), m.foil(),
+                    m.sourceCardId(), m.priceOld(), m.priceNew(), m.priceDiff());
+        }
+    }
+
+    /** Wraps both mover lists together with the compared snapshot timestamps. */
+    public record PriceMoversResponse(
+            @JsonProperty("old_timestamp") LocalDateTime oldTimestamp,
+            @JsonProperty("new_timestamp") LocalDateTime newTimestamp,
+            @JsonProperty("top_gainers") java.util.List<CardMoverResponse> topGainers,
+            @JsonProperty("top_losers") java.util.List<CardMoverResponse> topLosers) {
+
+        PriceMoversResponse(CollectionCardDataDumpService.PriceMoversResult r) {
+            this(r.oldTimestamp(), r.newTimestamp(),
+                    r.gainers().stream().map(CardMoverResponse::from).toList(),
+                    r.losers().stream().map(CardMoverResponse::from).toList());
         }
     }
 }

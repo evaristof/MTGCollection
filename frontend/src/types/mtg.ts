@@ -66,6 +66,31 @@ export interface ImportJobSnapshot {
 }
 
 /**
+ * A single card entry in the price-movers response.
+ */
+export interface CardMover {
+  card_name: string
+  set_code: string
+  set_name_raw: string | null
+  foil: boolean
+  source_card_id: number | null
+  price_old: number
+  price_new: number
+  price_diff: number
+}
+
+/**
+ * Response from GET /api/collection/datadumps/stats/price-movers.
+ * Contains top gainers and top losers between the two most recent snapshots.
+ */
+export interface PriceMoversResponse {
+  old_timestamp: string
+  new_timestamp: string
+  top_gainers: CardMover[]
+  top_losers: CardMover[]
+}
+
+/**
  * Shape of a price lookup response (GET /api/prices/by-name or /by-number).
  */
 export interface CardPrice {
