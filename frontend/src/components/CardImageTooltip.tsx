@@ -6,9 +6,14 @@ interface Props {
   cardName: string
 }
 
+const MARGIN = 12
+const SINGLE_WIDTH = 340
+const DUAL_WIDTH = 270
+
 /**
  * Shows the card image in a floating tooltip anchored to the mouse pointer.
  * For double-faced cards, both faces are displayed side by side.
+ * Repositions automatically to avoid being clipped by viewport edges.
  */
 export function CardImageTooltip({ cardId, cardName }: Props) {
   const [visible, setVisible] = useState(false)
@@ -21,10 +26,29 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   useEffect(() => {
     if (!visible) return
     const handler = (e: MouseEvent) => {
-      if (tooltipRef.current) {
-        tooltipRef.current.style.left = `${e.clientX + 16}px`
-        tooltipRef.current.style.top = `${e.clientY + 16}px`
+      const el = tooltipRef.current
+      if (!el) return
+
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const tw = el.offsetWidth
+      const th = el.offsetHeight
+
+      let x = e.clientX + MARGIN
+      let y = e.clientY + MARGIN
+
+      if (x + tw > vw - MARGIN) {
+        x = e.clientX - tw - MARGIN
       }
+      if (y + th > vh - MARGIN) {
+        y = e.clientY - th - MARGIN
+      }
+
+      x = Math.max(MARGIN, x)
+      y = Math.max(MARGIN, y)
+
+      el.style.left = `${x}px`
+      el.style.top = `${y}px`
     }
     document.addEventListener('mousemove', handler)
     return () => document.removeEventListener('mousemove', handler)
@@ -60,7 +84,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   }
 
   const isDoubleFaced = faceCount > 1
-  const imgWidth = isDoubleFaced ? 200 : 250
+  const imgWidth = isDoubleFaced ? DUAL_WIDTH : SINGLE_WIDTH
 
   return (
     <span
