@@ -56,20 +56,33 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
             top: -9999,
             zIndex: 9999,
             pointerEvents: 'none',
-            background: '#1a1a2e',
+            background: 'var(--bg-alt)',
+            border: '1px solid var(--border)',
             borderRadius: 8,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
             padding: 4,
             maxWidth: 260,
           }}
         >
           {!loaded && !errored && (
-            <div style={{ color: '#aaa', padding: '24px 16px', fontSize: 13 }}>
+            <div
+              style={{
+                color: 'var(--muted)',
+                padding: '24px 16px',
+                fontSize: 13,
+              }}
+            >
               Carregando…
             </div>
           )}
           {errored && (
-            <div style={{ color: '#f66', padding: '24px 16px', fontSize: 13 }}>
+            <div
+              style={{
+                color: 'var(--danger)',
+                padding: '24px 16px',
+                fontSize: 13,
+              }}
+            >
               Imagem indisponível
             </div>
           )}
