@@ -109,7 +109,6 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     setLoadedFaces(new Set())
     setErroredFaces(new Set())
     setZoom(1)
-    setLayout('normal')
   }
 
   const onLeave = () => {
