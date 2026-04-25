@@ -2,6 +2,7 @@ package com.evaristof.mtgcollection;
 
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.scheduling.annotation.EnableAsync;
 
 /**
  * Default entry point for the packaged jar.
@@ -24,6 +25,7 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
  * {@link MtgCollectionH2Application} instead.
  */
 @SpringBootApplication
+@EnableAsync
 public class MtgCollectionApplication {
 
     public static void main(String[] args) {
