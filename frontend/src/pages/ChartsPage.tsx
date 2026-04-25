@@ -54,7 +54,7 @@ export default function ChartsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [points, setPoints] = useState<DumpTotalPoint[]>([])
-  const [movers, setMovers] = useState<PriceMoversResponse | null>(null)
+  const [movers, setMovers] = useState<PriceMoversResponse | null | undefined>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -63,7 +63,10 @@ export default function ChartsPage() {
       const params = { from: from.trim() || undefined, to: to.trim() || undefined }
       const [rows, moversResult] = await Promise.all([
         api.dumpTotalValues(params),
-        api.dumpPriceMovers(params).catch(() => null),
+        api.dumpPriceMovers(params).catch((e) => {
+          console.error('dumpPriceMovers failed:', e)
+          return undefined
+        }),
       ])
       setPoints(
         rows.map((r) => ({
@@ -71,7 +74,7 @@ export default function ChartsPage() {
           value: Number(r.total_value),
         })),
       )
-      setMovers(moversResult)
+      setMovers(moversResult ?? null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -221,12 +224,12 @@ export default function ChartsPage() {
               </h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
                 <MoverTable
-                  title="Top 10 — Valorizaram"
+                  title={`Top ${movers.top_gainers.length} — Valorizaram`}
                   cards={movers.top_gainers}
                   positive
                 />
                 <MoverTable
-                  title="Top 10 — Desvalorizaram"
+                  title={`Top ${movers.top_losers.length} — Desvalorizaram`}
                   cards={movers.top_losers}
                   positive={false}
                 />
@@ -268,6 +271,7 @@ function MoverTable({
               <th>Carta</th>
               <th>Coleção</th>
               <th>Foil</th>
+              <th>Idioma</th>
               <th>Anterior</th>
               <th>Atual</th>
               <th>Variação</th>
@@ -286,6 +290,7 @@ function MoverTable({
                 </td>
                 <td title={c.set_code}>{c.set_name_raw || c.set_code}</td>
                 <td>{c.foil ? 'Sim' : 'Não'}</td>
+                <td>{c.language ?? '—'}</td>
                 <td>{formatMoney(c.price_old)}</td>
                 <td>{formatMoney(c.price_new)}</td>
                 <td style={{ color: positive ? '#2e7d32' : '#c62828', fontWeight: 600 }}>

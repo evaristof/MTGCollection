@@ -15,7 +15,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Manages point-in-time snapshots ("data dumps") of the user's collection.
@@ -109,11 +108,11 @@ public class CollectionCardDataDumpService {
      * returns the top {@code limit} cards that appreciated the most and the
      * top {@code limit} that depreciated the most.
      *
-     * <p>A card is identified by the triple
-     * {@code (cardName, setCode, foil)}. When the same identity exists in
-     * both dumps we compute {@code newPrice − oldPrice}; cards that only
-     * appear in one of the two dumps are ignored (they were added/removed,
-     * not repriced).</p>
+     * <p>A card is identified by the quintuple
+     * {@code (cardName, setCode, cardNumber, foil, language)}. When the
+     * same identity exists in both dumps we compute
+     * {@code newPrice − oldPrice}; cards that only appear in one of the
+     * two dumps are ignored (they were added/removed, not repriced).</p>
      *
      * @return a {@link PriceMoversResult} with both lists, or {@code null}
      *         when fewer than two dumps exist in the range.
@@ -123,25 +122,25 @@ public class CollectionCardDataDumpService {
         LocalDateTime effectiveFrom = from != null ? from : LocalDateTime.of(1, 1, 1, 0, 0);
         LocalDateTime effectiveTo = to != null ? to : LocalDateTime.of(9999, 12, 31, 23, 59, 59);
 
-        List<LocalDateTime> timestamps = dumpRepository.findDumpTimestampsBetween(effectiveFrom, effectiveTo);
+        List<LocalDateTime> timestamps = dumpRepository.findLastTwoDumpTimestampsBetween(effectiveFrom, effectiveTo);
         if (timestamps.size() < 2) {
             return null;
         }
 
-        LocalDateTime oldTs = timestamps.get(timestamps.size() - 2);
-        LocalDateTime newTs = timestamps.get(timestamps.size() - 1);
+        LocalDateTime oldTs = timestamps.get(0);
+        LocalDateTime newTs = timestamps.get(1);
 
         List<CollectionCardDataDump> oldRows = dumpRepository.findByDataDumpDateTimeOrderByCardNameAsc(oldTs);
         List<CollectionCardDataDump> newRows = dumpRepository.findByDataDumpDateTimeOrderByCardNameAsc(newTs);
 
         Map<CardKey, CollectionCardDataDump> oldMap = new HashMap<>();
         for (CollectionCardDataDump d : oldRows) {
-            oldMap.put(new CardKey(d.getCardName(), d.getSetCode(), d.isFoil(), d.getLanguage()), d);
+            oldMap.put(new CardKey(d.getCardName(), d.getSetCode(), d.getCardNumber(), d.isFoil(), d.getLanguage()), d);
         }
 
         List<CardMover> movers = new ArrayList<>();
         for (CollectionCardDataDump nd : newRows) {
-            CardKey key = new CardKey(nd.getCardName(), nd.getSetCode(), nd.isFoil(), nd.getLanguage());
+            CardKey key = new CardKey(nd.getCardName(), nd.getSetCode(), nd.getCardNumber(), nd.isFoil(), nd.getLanguage());
             CollectionCardDataDump od = oldMap.get(key);
             if (od == null) continue;
 
@@ -155,6 +154,7 @@ public class CollectionCardDataDumpService {
                     nd.getSetCode(),
                     nd.getSetNameRaw(),
                     nd.isFoil(),
+                    nd.getLanguage(),
                     nd.getSourceCardId(),
                     oldPrice,
                     newPrice,
@@ -176,21 +176,7 @@ public class CollectionCardDataDumpService {
         return new PriceMoversResult(oldTs, newTs, gainers, losers);
     }
 
-    private record CardKey(String cardName, String setCode, boolean foil, String language) {
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof CardKey that)) return false;
-            return foil == that.foil
-                    && Objects.equals(cardName, that.cardName)
-                    && Objects.equals(setCode, that.setCode)
-                    && Objects.equals(language, that.language);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(cardName, setCode, foil, language);
-        }
+    private record CardKey(String cardName, String setCode, String cardNumber, boolean foil, String language) {
     }
 
     public record CardMover(
@@ -198,6 +184,7 @@ public class CollectionCardDataDumpService {
             String setCode,
             String setNameRaw,
             boolean foil,
+            String language,
             Long sourceCardId,
             BigDecimal priceOld,
             BigDecimal priceNew,

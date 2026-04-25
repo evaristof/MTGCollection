@@ -41,16 +41,31 @@ public interface CollectionCardDataDumpRepository
     long countBySourceCardId(@Param("sourceCardId") Long sourceCardId);
 
     /**
-     * Distinct dump timestamps in ascending order within the given range.
-     * Used by the price-movers calculation to find the two most recent
-     * snapshots within the user's selected interval.
+     * The two most recent distinct dump timestamps within the given range,
+     * returned in ascending order (oldest first). Only fetches 2 rows from
+     * the DB instead of every timestamp in the range.
      */
     @Query("select distinct d.dataDumpDateTime from CollectionCardDataDump d "
             + "where d.dataDumpDateTime >= :from and d.dataDumpDateTime <= :to "
-            + "order by d.dataDumpDateTime asc")
-    List<LocalDateTime> findDumpTimestampsBetween(
+            + "order by d.dataDumpDateTime desc "
+            + "limit 2")
+    List<LocalDateTime> findLastTwoDumpTimestampsDescBetween(
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to);
+
+    /**
+     * Convenience wrapper that returns the two most recent timestamps in
+     * ascending order (oldest first) — ready for the caller to use as
+     * {@code [oldTs, newTs]}.
+     */
+    default List<LocalDateTime> findLastTwoDumpTimestampsBetween(
+            LocalDateTime from, LocalDateTime to) {
+        List<LocalDateTime> desc = findLastTwoDumpTimestampsDescBetween(from, to);
+        if (desc.size() == 2) {
+            return List.of(desc.get(1), desc.get(0));
+        }
+        return desc;
+    }
 
     /**
      * Aggregates each snapshot's total collection value ({@code SUM(price * quantity)})
