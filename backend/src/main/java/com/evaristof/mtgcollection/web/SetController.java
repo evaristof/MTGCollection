@@ -5,20 +5,22 @@ import com.evaristof.mtgcollection.scryfall.dto.ScryfallSet;
 import com.evaristof.mtgcollection.service.SetImageService;
 import com.evaristof.mtgcollection.service.SetPersistenceService;
 import com.evaristof.mtgcollection.service.SetService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
+import java.util.NoSuchElementException;
 
 @RestController
 @RequestMapping("/api/sets")
 public class SetController {
-
-    private static final Logger log = LoggerFactory.getLogger(SetController.class);
 
     private final SetService setService;
     private final SetPersistenceService setPersistenceService;
@@ -41,17 +43,51 @@ public class SetController {
 
     /**
      * POST /api/sets/sync — fetches the set list from Scryfall,
-     * persists it into the in-memory database, then downloads set icons
-     * to MinIO (outside the DB transaction).
+     * persists it into the in-memory database, then fires off an async
+     * icon download to MinIO so the HTTP response returns immediately.
      */
     @PostMapping("/sync")
     public List<MagicSet> syncSets() {
         List<MagicSet> saved = setPersistenceService.syncSetsFromScryfall();
-        try {
-            setImageService.syncAllSetIcons();
-        } catch (RuntimeException e) {
-            log.warn("Set icon sync failed (best-effort): {}", e.getMessage());
-        }
+        setImageService.syncAllSetIconsAsync();
         return saved;
+    }
+
+    /**
+     * GET /api/sets/{code}/icon — returns the SVG icon for a set.
+     */
+    @GetMapping("/{code}/icon")
+    public ResponseEntity<?> getSetIcon(@PathVariable("code") String code) {
+        try {
+            byte[] svg = setImageService.getSetIcon(code);
+            HttpHeaders headers = new HttpHeaders();
+            headers.set(HttpHeaders.CONTENT_TYPE, "image/svg+xml");
+            headers.setCacheControl("public, max-age=86400");
+            return new ResponseEntity<>(svg, headers, HttpStatus.OK);
+        } catch (NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(Map.of("message", e.getMessage()));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to retrieve set icon: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * POST /api/sets/sync-icons — downloads all uncached set icons from
+     * Scryfall and stores them in MinIO (synchronous).
+     */
+    @PostMapping("/sync-icons")
+    public ResponseEntity<?> syncSetIcons() {
+        try {
+            int count = setImageService.syncAllSetIcons();
+            return ResponseEntity.ok(Map.of("synced", count));
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to sync set icons: " + e.getMessage()));
+        }
     }
 }

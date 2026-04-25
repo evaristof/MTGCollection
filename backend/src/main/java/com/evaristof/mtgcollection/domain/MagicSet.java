@@ -48,7 +48,8 @@ public class MagicSet {
     }
 
     public MagicSet(String setCode, String setName, LocalDate releaseDate, String setType,
-                    Integer cardCount, Integer printedSize, String blockCode, String blockName) {
+                    Integer cardCount, Integer printedSize, String blockCode, String blockName,
+                    String iconSvgUri) {
         this.setCode = setCode;
         this.setName = setName;
         this.releaseDate = releaseDate;
@@ -57,6 +58,7 @@ public class MagicSet {
         this.printedSize = printedSize;
         this.blockCode = blockCode;
         this.blockName = blockName;
+        this.iconSvgUri = iconSvgUri;
     }
 
     public String getSetCode() {

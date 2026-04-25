@@ -12,7 +12,7 @@ import io.minio.errors.ErrorResponseException;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
@@ -64,13 +64,25 @@ public class SetImageService {
         }
     }
 
+    private static final int THROTTLE_MS = 100;
+    private static final int MAX_CONSECUTIVE_UPLOAD_FAILURES = 5;
+
     /**
      * Builds the object key for a set icon inside the bucket.
-     * Format: "{code}-{name}.svg"
+     * Format: "{code}.svg" — keyed only by set code to avoid orphaned
+     * objects when set names change.
      */
-    public String objectKey(String setCode, String setName) {
-        String safeName = sanitise(setName);
-        return setCode + "-" + safeName + ".svg";
+    public String objectKey(String setCode) {
+        return setCode + ".svg";
+    }
+
+    /**
+     * Asynchronously downloads all set icons. Fire-and-forget variant of
+     * {@link #syncAllSetIcons()}.
+     */
+    @Async
+    public void syncAllSetIconsAsync() {
+        syncAllSetIcons();
     }
 
     /**
@@ -83,11 +95,12 @@ public class SetImageService {
     public int syncAllSetIcons() {
         List<MagicSet> sets = setRepository.findAll();
         int downloaded = 0;
+        int consecutiveUploadFailures = 0;
         for (MagicSet set : sets) {
             if (set.getIconSvgUri() == null || set.getIconSvgUri().isBlank()) {
                 continue;
             }
-            String key = objectKey(set.getSetCode(), set.getSetName());
+            String key = objectKey(set.getSetCode());
             if (existsInMinio(key)) {
                 continue;
             }
@@ -95,11 +108,21 @@ public class SetImageService {
                 byte[] svgBytes = downloadImage(set.getIconSvgUri());
                 upload(key, svgBytes, "image/svg+xml");
                 downloaded++;
+                consecutiveUploadFailures = 0;
                 log.debug("Cached set icon '{}' ({} bytes)", key, svgBytes.length);
             } catch (RuntimeException e) {
                 log.warn("Failed to download/cache icon for set '{}': {}",
                         set.getSetCode(), e.getMessage());
+                if (isUploadFailure(e)) {
+                    consecutiveUploadFailures++;
+                    if (consecutiveUploadFailures >= MAX_CONSECUTIVE_UPLOAD_FAILURES) {
+                        log.error("Aborting icon sync — {} consecutive MinIO upload failures",
+                                consecutiveUploadFailures);
+                        break;
+                    }
+                }
             }
+            throttle();
         }
         log.info("Set icon sync complete: {} new icons cached", downloaded);
         return downloaded;
@@ -119,7 +142,7 @@ public class SetImageService {
                     "Set '" + setCode + "' has no icon_svg_uri");
         }
 
-        String key = objectKey(set.getSetCode(), set.getSetName());
+        String key = objectKey(set.getSetCode());
 
         if (existsInMinio(key)) {
             return downloadFromMinio(key);
@@ -199,8 +222,15 @@ public class SetImageService {
         }
     }
 
-    private static String sanitise(String input) {
-        if (input == null) return "unknown";
-        return input.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+    private static boolean isUploadFailure(RuntimeException e) {
+        return e.getMessage() != null && e.getMessage().startsWith("Failed to upload");
+    }
+
+    private static void throttle() {
+        try {
+            Thread.sleep(THROTTLE_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

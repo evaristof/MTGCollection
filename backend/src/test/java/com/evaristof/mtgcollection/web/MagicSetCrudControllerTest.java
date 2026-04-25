@@ -42,7 +42,7 @@ class MagicSetCrudControllerTest {
     private static MagicSet sample() {
         return new MagicSet("neo", "Kamigawa: Neon Dynasty",
                 LocalDate.of(2022, 2, 18), "expansion",
-                302, 302, "NEO", "Kamigawa");
+                302, 302, "NEO", "Kamigawa", null);
     }
 
     @Test

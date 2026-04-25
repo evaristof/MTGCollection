@@ -26,7 +26,8 @@ class MagicSetRepositoryTest {
                 302,
                 302,
                 "NEO",
-                "Kamigawa"
+                "Kamigawa",
+                null
         );
 
         repository.save(set);
