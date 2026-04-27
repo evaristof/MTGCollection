@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { MagicSet, ScannerMatchResult } from '../types/mtg'
 import { createWorker } from 'tesseract.js'
+import type { Worker } from 'tesseract.js'
 
 type ScanMode = 'phash' | 'ocr'
 
@@ -24,9 +25,20 @@ export default function ScannerPage() {
   const [scannedCards, setScannedCards] = useState<ScannedCard[]>([])
   const [error, setError] = useState<string | null>(null)
   const [sets, setSets] = useState<MagicSet[]>([])
+  const workerRef = useRef<Worker | null>(null)
 
   useEffect(() => {
     void api.listSets().then(setSets).catch(() => {})
+    return () => {
+      void workerRef.current?.terminate()
+    }
+  }, [])
+
+  const getOrCreateWorker = useCallback(async (): Promise<Worker> => {
+    if (workerRef.current) return workerRef.current
+    const worker = await createWorker('eng')
+    workerRef.current = worker
+    return worker
   }, [])
 
   const setOptions = useMemo(
@@ -79,13 +91,9 @@ export default function ScannerPage() {
           setError('Nenhuma carta correspondente encontrada. Tente outra imagem ou use o modo OCR.')
         }
       } else {
-        const worker = await createWorker('eng')
-        try {
-          const { data } = await worker.recognize(imageFile)
-          setOcrText(data.text.trim())
-        } finally {
-          await worker.terminate()
-        }
+        const worker = await getOrCreateWorker()
+        const { data } = await worker.recognize(imageFile)
+        setOcrText(data.text.trim())
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

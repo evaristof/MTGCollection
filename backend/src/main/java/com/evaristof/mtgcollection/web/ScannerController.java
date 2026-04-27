@@ -48,11 +48,10 @@ public class ScannerController {
             if (matchResult != null) {
                 result.put("matched", true);
                 CardImageHash match = matchResult.card();
-                double confidence = matchResult.confidence();
                 result.put("card_name", match.getCardName());
                 result.put("set_code", match.getSetCode());
                 result.put("collector_number", match.getCollectorNumber());
-                result.put("confidence", Math.round(confidence * 100.0) / 100.0);
+                result.put("confidence", matchResult.confidence());
                 result.put("image_url", "/api/scanner/image/" + match.getSetCode() + "/" + match.getCollectorNumber());
             } else {
                 result.put("matched", false);
@@ -75,10 +74,10 @@ public class ScannerController {
     @PostMapping("/sync-images")
     public ResponseEntity<Map<String, String>> syncImages(@RequestParam("set") String setCode) {
         try {
-            matchService.syncImagesFromScryfall(setCode);
-            return ResponseEntity.ok(Map.of(
-                    "status", "ok",
-                    "message", "Sync completed for set: " + setCode));
+            matchService.syncImagesFromScryfallAsync(setCode);
+            return ResponseEntity.accepted().body(Map.of(
+                    "status", "accepted",
+                    "message", "Sync started for set: " + setCode));
         } catch (Exception e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
             return ResponseEntity.internalServerError().body(Map.of(

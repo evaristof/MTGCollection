@@ -1,14 +1,18 @@
 package com.evaristof.mtgcollection.service;
 
 import com.evaristof.mtgcollection.domain.CardImageHash;
+import com.evaristof.mtgcollection.domain.MagicSet;
 import com.evaristof.mtgcollection.repository.CardImageHashRepository;
+import com.evaristof.mtgcollection.repository.MagicSetRepository;
 import com.evaristof.mtgcollection.scryfall.ScryfallHttpClient;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import dev.brachtendorf.jimagehash.hashAlgorithms.PerceptiveHash;
 import dev.brachtendorf.jimagehash.hash.Hash;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
@@ -35,6 +39,7 @@ public class CardImageMatchService {
     private static final int HASH_BIT_RESOLUTION = 64;
 
     private final CardImageHashRepository hashRepository;
+    private final MagicSetRepository setRepository;
     private final MinioStorageService minioStorage;
     private final ScryfallHttpClient scryfallClient;
     private final Gson gson;
@@ -43,10 +48,12 @@ public class CardImageMatchService {
     public record MatchResult(CardImageHash card, double confidence) {}
 
     public CardImageMatchService(CardImageHashRepository hashRepository,
+                                 MagicSetRepository setRepository,
                                  MinioStorageService minioStorage,
                                  ScryfallHttpClient scryfallClient,
                                  Gson gson) {
         this.hashRepository = hashRepository;
+        this.setRepository = setRepository;
         this.minioStorage = minioStorage;
         this.scryfallClient = scryfallClient;
         this.gson = gson;
@@ -56,6 +63,11 @@ public class CardImageMatchService {
                 .build();
     }
 
+    @PreDestroy
+    void closeHttpClient() {
+        imageHttpClient.close();
+    }
+
     public String computeHash(BufferedImage image) {
         PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
         Hash hash = hasher.hash(image);
@@ -63,8 +75,10 @@ public class CardImageMatchService {
     }
 
     public MatchResult findBestMatch(BufferedImage uploadedImage) {
-        String uploadedHash = computeHash(uploadedImage);
-        BigInteger uploadedValue = new BigInteger(uploadedHash, 16);
+        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
+        Hash uploadedHash = hasher.hash(uploadedImage);
+        BigInteger uploadedValue = uploadedHash.getHashValue();
+        int actualBitLength = uploadedHash.getBitResolution();
 
         List<CardImageHash> allHashes = hashRepository.findAll();
         if (allHashes.isEmpty()) {
@@ -76,7 +90,7 @@ public class CardImageMatchService {
 
         for (CardImageHash candidate : allHashes) {
             BigInteger candidateValue = new BigInteger(candidate.getPHash(), 16);
-            double distance = normalizedHammingDistance(uploadedValue, candidateValue, HASH_BIT_RESOLUTION);
+            double distance = normalizedHammingDistance(uploadedValue, candidateValue, actualBitLength);
             if (distance < bestDistance) {
                 bestDistance = distance;
                 bestMatch = candidate;
@@ -95,6 +109,11 @@ public class CardImageMatchService {
         return hashRepository.findBySetCodeAndCollectorNumber(setCode, collectorNumber);
     }
 
+    @Async
+    public void syncImagesFromScryfallAsync(String setCode) {
+        syncImagesFromScryfall(setCode);
+    }
+
     public void syncImagesFromScryfall(String setCode) {
         try {
             String searchPath = "/cards/search?q=" +
@@ -105,6 +124,9 @@ public class CardImageMatchService {
             while (currentPage != null) {
                 currentPage = processSearchPage(currentPage, setCode);
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Sync interrupted for set: " + setCode, e);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to sync images for set: " + setCode, e);
         }
@@ -122,6 +144,9 @@ public class CardImageMatchService {
             try {
                 processCard(cardMap, setCode);
                 Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
             } catch (Exception e) {
                 log.warn("Failed to process card: {}", e.getMessage());
             }
@@ -140,6 +165,7 @@ public class CardImageMatchService {
     private void processCard(Map<String, Object> cardMap, String setCode) throws IOException, InterruptedException {
         String name = (String) cardMap.get("name");
         String collectorNumber = (String) cardMap.get("collector_number");
+        String setName = (String) cardMap.get("set_name");
 
         if (hashRepository.findBySetCodeAndCollectorNumber(setCode, collectorNumber).isPresent()) {
             log.debug("Hash already exists for {}/{}, skipping", setCode, collectorNumber);
@@ -160,8 +186,9 @@ public class CardImageMatchService {
             return;
         }
 
+        String resolvedSetName = setName != null ? setName : resolveSetName(setCode);
         String objectKey = minioStorage.objectKey(
-                setCode, setCode, collectorNumber,
+                resolvedSetName, setCode, collectorNumber,
                 name != null ? name : "Unknown");
         minioStorage.upload(objectKey, imageData);
 
@@ -175,6 +202,12 @@ public class CardImageMatchService {
         hashRepository.save(entity);
 
         log.info("Synced image hash for {}/{} ({})", setCode, collectorNumber, name);
+    }
+
+    private String resolveSetName(String setCode) {
+        return setRepository.findById(setCode)
+                .map(MagicSet::getSetName)
+                .orElse(setCode);
     }
 
     private byte[] downloadImage(String url) throws IOException, InterruptedException {
