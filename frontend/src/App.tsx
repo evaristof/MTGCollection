@@ -56,6 +56,10 @@ function App() {
             <span className="sidebar__icon" aria-hidden>📈</span>
             <span className="sidebar__label">Gráficos</span>
           </NavLink>
+          <NavLink to="/scanner" title="Scanner">
+            <span className="sidebar__icon" aria-hidden>🔍</span>
+            <span className="sidebar__label">Scanner</span>
+          </NavLink>
         </nav>
       </aside>
 

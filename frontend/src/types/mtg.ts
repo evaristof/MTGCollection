@@ -93,6 +93,32 @@ export interface PriceMoversResponse {
 }
 
 /**
+ * Response from POST /api/scanner/match.
+ */
+export interface ScannerMatchResult {
+  matched: boolean
+  card_name: string | null
+  set_code: string | null
+  collector_number: string | null
+  confidence: number
+  image_url: string | null
+}
+
+/**
+ * Card result from a Scryfall name search (backend proxy).
+ */
+export interface ScryfallCardResult {
+  name: string
+  set: string
+  collector_number: string
+  type_line?: string | null
+  rarity?: string | null
+  mana_cost?: string | null
+  oracle_text?: string | null
+  image_uris?: Record<string, string> | null
+}
+
+/**
  * Shape of a price lookup response (GET /api/prices/by-name or /by-number).
  */
 export interface CardPrice {

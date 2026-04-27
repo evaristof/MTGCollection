@@ -4,6 +4,8 @@ import type {
   ImportJobSnapshot,
   MagicSet,
   PriceMoversResponse,
+  ScannerMatchResult,
+  ScryfallCardResult,
   ScryfallSet,
 } from '../types/mtg'
 
@@ -227,4 +229,26 @@ export const api = {
         number,
       )}&foil=${foil}`,
     ),
+
+  // Scanner
+  scannerMatch: (file: File): Promise<ScannerMatchResult> => {
+    const form = new FormData()
+    form.append('image', file)
+    return fetch(`${API_BASE_URL}/api/scanner/match`, { method: 'POST', body: form }).then(
+      (res) => {
+        if (!res.ok) throw new Error(`Scanner match failed: ${res.status}`)
+        return res.json() as Promise<ScannerMatchResult>
+      },
+    )
+  },
+
+  cardByName: (name: string, set: string) =>
+    request<ScryfallCardResult>(
+      `/api/cards/by-name?name=${encodeURIComponent(name)}&set=${encodeURIComponent(set)}`,
+    ),
+
+  scannerSyncImages: (setCode: string) =>
+    request<void>(`/api/scanner/sync-images?set=${encodeURIComponent(setCode)}`, {
+      method: 'POST',
+    }),
 }
