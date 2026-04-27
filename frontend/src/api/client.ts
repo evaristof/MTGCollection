@@ -5,7 +5,6 @@ import type {
   MagicSet,
   PriceMoversResponse,
   ScannerMatchResult,
-  ScryfallCardResult,
   ScryfallSet,
 } from '../types/mtg'
 
@@ -241,11 +240,6 @@ export const api = {
       },
     )
   },
-
-  cardByName: (name: string, set: string) =>
-    request<ScryfallCardResult>(
-      `/api/cards/by-name?name=${encodeURIComponent(name)}&set=${encodeURIComponent(set)}`,
-    ),
 
   scannerSyncImages: (setCode: string) =>
     request<void>(`/api/scanner/sync-images?set=${encodeURIComponent(setCode)}`, {

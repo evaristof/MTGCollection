@@ -7,9 +7,22 @@ import com.evaristof.mtgcollection.repository.MagicSetRepository;
 import com.evaristof.mtgcollection.scryfall.ScryfallHttpClient;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
-import dev.brachtendorf.jimagehash.hashAlgorithms.PerceptiveHash;
 import dev.brachtendorf.jimagehash.hash.Hash;
+import dev.brachtendorf.jimagehash.hashAlgorithms.PerceptiveHash;
 import jakarta.annotation.PreDestroy;
+import nu.pattern.OpenCV;
+import org.opencv.calib3d.Calib3d;
+import org.opencv.core.Core;
+import org.opencv.core.DMatch;
+import org.opencv.core.Mat;
+import org.opencv.core.MatOfByte;
+import org.opencv.core.MatOfDMatch;
+import org.opencv.core.MatOfKeyPoint;
+import org.opencv.core.MatOfPoint2f;
+import org.opencv.features2d.BFMatcher;
+import org.opencv.features2d.ORB;
+import org.opencv.imgcodecs.Imgcodecs;
+import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -18,6 +31,7 @@ import org.springframework.stereotype.Service;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.net.URI;
@@ -27,6 +41,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -34,9 +50,21 @@ import java.util.Optional;
 @Service
 public class CardImageMatchService {
 
+    static {
+        OpenCV.loadLocally();
+    }
+
     private static final Logger log = LoggerFactory.getLogger(CardImageMatchService.class);
-    private static final double MATCH_THRESHOLD = 0.3;
     private static final int HASH_BIT_RESOLUTION = 64;
+    private static final int PHASH_SHORTLIST_SIZE = 12;
+    private static final double PHASH_SHORTLIST_DISTANCE = 0.45;
+    private static final double PHASH_DIRECT_MATCH_DISTANCE = 0.10;
+    private static final int ORB_FEATURES = 1500;
+    private static final float ORB_RATIO_TEST = 0.75f;
+    private static final int MIN_ORB_GOOD_MATCHES = 10;
+    private static final int MIN_ORB_INLIERS = 8;
+    private static final double MIN_HYBRID_CONFIDENCE = 0.35;
+    private static final int MAX_IMAGE_DIMENSION = 1400;
 
     private final CardImageHashRepository hashRepository;
     private final MagicSetRepository setRepository;
@@ -46,6 +74,10 @@ public class CardImageMatchService {
     private final HttpClient imageHttpClient;
 
     public record MatchResult(CardImageHash card, double confidence) {}
+
+    private record Candidate(CardImageHash card, double pHashDistance) {}
+
+    private record OrbValidationResult(double score, int goodMatches, int inliers) {}
 
     public CardImageMatchService(CardImageHashRepository hashRepository,
                                  MagicSetRepository setRepository,
@@ -85,24 +117,61 @@ public class CardImageMatchService {
             return null;
         }
 
-        CardImageHash bestMatch = null;
-        double bestDistance = Double.MAX_VALUE;
+        List<Candidate> rankedCandidates = allHashes.stream()
+                .map(candidate -> new Candidate(
+                        candidate,
+                        normalizedHammingDistance(uploadedValue, new BigInteger(candidate.getPHash(), 16), actualBitLength)))
+                .sorted(Comparator.comparingDouble(Candidate::pHashDistance))
+                .toList();
 
-        for (CardImageHash candidate : allHashes) {
-            BigInteger candidateValue = new BigInteger(candidate.getPHash(), 16);
-            double distance = normalizedHammingDistance(uploadedValue, candidateValue, actualBitLength);
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestMatch = candidate;
+        List<Candidate> shortlist = rankedCandidates.stream()
+                .filter(candidate -> candidate.pHashDistance() <= PHASH_SHORTLIST_DISTANCE)
+                .limit(PHASH_SHORTLIST_SIZE)
+                .toList();
+        if (shortlist.isEmpty()) {
+            shortlist = rankedCandidates.stream().limit(PHASH_SHORTLIST_SIZE).toList();
+        }
+
+        Candidate bestCandidate = null;
+        OrbValidationResult bestOrbResult = null;
+        double bestConfidence = -1.0;
+
+        for (Candidate candidate : shortlist) {
+            try {
+                byte[] referenceBytes = minioStorage.download(candidate.card().getMinioPath());
+                BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
+                if (referenceImage == null) {
+                    continue;
+                }
+
+                OrbValidationResult orbResult = computeOrbValidation(uploadedImage, referenceImage);
+                double confidence = combineConfidence(candidate.pHashDistance(), orbResult.score());
+                if (confidence > bestConfidence) {
+                    bestCandidate = candidate;
+                    bestOrbResult = orbResult;
+                    bestConfidence = confidence;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to validate candidate {}/{}: {}",
+                        candidate.card().getSetCode(),
+                        candidate.card().getCollectorNumber(),
+                        e.getMessage());
             }
         }
 
-        if (bestDistance > MATCH_THRESHOLD) {
+        if (bestCandidate == null || bestOrbResult == null) {
             return null;
         }
 
-        double confidence = Math.round((1.0 - bestDistance) * 100.0) / 100.0;
-        return new MatchResult(bestMatch, confidence);
+        boolean orbAccepted = bestOrbResult.inliers() >= MIN_ORB_INLIERS
+                || bestOrbResult.goodMatches() >= MIN_ORB_GOOD_MATCHES;
+        boolean directPHashAccepted = bestCandidate.pHashDistance() <= PHASH_DIRECT_MATCH_DISTANCE;
+        if (!orbAccepted && !directPHashAccepted && bestConfidence < MIN_HYBRID_CONFIDENCE) {
+            return null;
+        }
+
+        double roundedConfidence = Math.round(bestConfidence * 100.0) / 100.0;
+        return new MatchResult(bestCandidate.card(), roundedConfidence);
     }
 
     public Optional<CardImageHash> findHashBySetAndNumber(String setCode, String collectorNumber) {
@@ -167,27 +236,31 @@ public class CardImageMatchService {
     private record ParsedObjectKey(String setCode, String collectorNumber, String cardName) {}
 
     private ParsedObjectKey parseObjectKey(String objectKey) {
-        // Expected format: "<setName> - <setCode>/<collectorNumber>-<cardName>.png"
         int slashIdx = objectKey.indexOf('/');
-        if (slashIdx < 0) return null;
+        if (slashIdx < 0) {
+            return null;
+        }
 
         String folder = objectKey.substring(0, slashIdx);
         String file = objectKey.substring(slashIdx + 1);
 
-        // Extract setCode from folder: "Core Set 2020 - m20" -> "m20"
         int dashSpaceIdx = folder.lastIndexOf(" - ");
-        if (dashSpaceIdx < 0) return null;
+        if (dashSpaceIdx < 0) {
+            return null;
+        }
         String setCode = folder.substring(dashSpaceIdx + 3).trim();
 
-        // Extract collectorNumber and cardName from file: "150-Lightning Bolt.png"
         String fileWithoutExt = file.replaceFirst("\\.[^.]+$", "");
         int firstDash = fileWithoutExt.indexOf('-');
-        if (firstDash < 0) return null;
+        if (firstDash < 0) {
+            return null;
+        }
 
         String collectorNumber = fileWithoutExt.substring(0, firstDash);
         String cardName = fileWithoutExt.substring(firstDash + 1);
-
-        if (setCode.isEmpty() || collectorNumber.isEmpty()) return null;
+        if (setCode.isEmpty() || collectorNumber.isEmpty()) {
+            return null;
+        }
 
         return new ParsedObjectKey(setCode, collectorNumber, cardName);
     }
@@ -216,7 +289,9 @@ public class CardImageMatchService {
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> data = (List<Map<String, Object>>) response.get("data");
-        if (data == null) return null;
+        if (data == null) {
+            return null;
+        }
 
         for (Map<String, Object> cardMap : data) {
             try {
@@ -306,5 +381,119 @@ public class CardImageMatchService {
         BigInteger xor = a.xor(b);
         int diffBits = xor.bitCount();
         return (double) diffBits / bitLength;
+    }
+
+    private double combineConfidence(double pHashDistance, double orbScore) {
+        double pHashScore = 1.0 - Math.min(1.0, pHashDistance);
+        return (pHashScore * 0.35) + (orbScore * 0.65);
+    }
+
+    private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
+                                                     BufferedImage referenceImage) throws IOException {
+        Mat source = toNormalizedGrayMat(sourceImage);
+        Mat reference = toNormalizedGrayMat(referenceImage);
+        MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
+        MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
+        Mat sourceDescriptors = new Mat();
+        Mat referenceDescriptors = new Mat();
+        Mat inlierMask = new Mat();
+
+        try {
+            ORB orb = ORB.create(ORB_FEATURES);
+            orb.detectAndCompute(source, new Mat(), sourceKeypoints, sourceDescriptors);
+            orb.detectAndCompute(reference, new Mat(), referenceKeypoints, referenceDescriptors);
+            if (sourceDescriptors.empty() || referenceDescriptors.empty()) {
+                return new OrbValidationResult(0.0, 0, 0);
+            }
+
+            BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
+            List<MatOfDMatch> knnMatches = new ArrayList<>();
+            matcher.knnMatch(sourceDescriptors, referenceDescriptors, knnMatches, 2);
+
+            List<DMatch> goodMatches = new ArrayList<>();
+            for (MatOfDMatch matchGroup : knnMatches) {
+                DMatch[] matches = matchGroup.toArray();
+                if (matches.length < 2) {
+                    continue;
+                }
+                if (matches[0].distance < ORB_RATIO_TEST * matches[1].distance) {
+                    goodMatches.add(matches[0]);
+                }
+            }
+
+            if (goodMatches.isEmpty()) {
+                return new OrbValidationResult(0.0, 0, 0);
+            }
+
+            int inliers = 0;
+            if (goodMatches.size() >= 4) {
+                List<org.opencv.core.Point> sourcePoints = new ArrayList<>();
+                List<org.opencv.core.Point> referencePoints = new ArrayList<>();
+                org.opencv.core.KeyPoint[] sourceKeyPointArray = sourceKeypoints.toArray();
+                org.opencv.core.KeyPoint[] referenceKeyPointArray = referenceKeypoints.toArray();
+                for (DMatch match : goodMatches) {
+                    sourcePoints.add(sourceKeyPointArray[match.queryIdx].pt);
+                    referencePoints.add(referenceKeyPointArray[match.trainIdx].pt);
+                }
+                MatOfPoint2f sourceMat = new MatOfPoint2f();
+                sourceMat.fromList(sourcePoints);
+                MatOfPoint2f referenceMat = new MatOfPoint2f();
+                referenceMat.fromList(referencePoints);
+                try {
+                    Calib3d.findHomography(sourceMat, referenceMat, Calib3d.RANSAC, 5.0, inlierMask);
+                    for (int i = 0; i < inlierMask.rows(); i++) {
+                        double[] value = inlierMask.get(i, 0);
+                        if (value != null && value.length > 0 && value[0] != 0.0) {
+                            inliers++;
+                        }
+                    }
+                } finally {
+                    sourceMat.release();
+                    referenceMat.release();
+                }
+            }
+
+            double inlierScore = Math.min(1.0, inliers / 20.0);
+            double matchScore = Math.min(1.0, goodMatches.size() / 30.0);
+            double score = Math.max(inlierScore, matchScore * 0.75);
+            return new OrbValidationResult(score, goodMatches.size(), inliers);
+        } finally {
+            source.release();
+            reference.release();
+            sourceKeypoints.release();
+            referenceKeypoints.release();
+            sourceDescriptors.release();
+            referenceDescriptors.release();
+            inlierMask.release();
+        }
+    }
+
+    private Mat toNormalizedGrayMat(BufferedImage image) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ImageIO.write(image, "png", output);
+        MatOfByte bytes = new MatOfByte(output.toByteArray());
+        Mat decoded = Imgcodecs.imdecode(bytes, Imgcodecs.IMREAD_COLOR);
+        Mat gray = new Mat();
+        try {
+            Imgproc.cvtColor(decoded, gray, Imgproc.COLOR_BGR2GRAY);
+            if (gray.cols() > MAX_IMAGE_DIMENSION || gray.rows() > MAX_IMAGE_DIMENSION) {
+                double scale = Math.min(
+                        (double) MAX_IMAGE_DIMENSION / gray.cols(),
+                        (double) MAX_IMAGE_DIMENSION / gray.rows());
+                Mat resized = new Mat();
+                try {
+                    Imgproc.resize(gray, resized, new org.opencv.core.Size(), scale, scale, Imgproc.INTER_AREA);
+                    gray.release();
+                    gray = resized.clone();
+                } finally {
+                    resized.release();
+                }
+            }
+            Imgproc.equalizeHist(gray, gray);
+            return gray;
+        } finally {
+            decoded.release();
+            bytes.release();
+        }
     }
 }

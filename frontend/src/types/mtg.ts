@@ -105,20 +105,6 @@ export interface ScannerMatchResult {
 }
 
 /**
- * Card result from a Scryfall name search (backend proxy).
- */
-export interface ScryfallCardResult {
-  name: string
-  set: string
-  collector_number: string
-  type_line?: string | null
-  rarity?: string | null
-  mana_cost?: string | null
-  oracle_text?: string | null
-  image_uris?: Record<string, string> | null
-}
-
-/**
  * Shape of a price lookup response (GET /api/prices/by-name or /by-number).
  */
 export interface CardPrice {
