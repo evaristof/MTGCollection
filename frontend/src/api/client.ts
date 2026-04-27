@@ -1,7 +1,9 @@
 import type {
   CardPrice,
   CollectionCard,
+  ImportJobSnapshot,
   MagicSet,
+  PriceMoversResponse,
   ScryfallSet,
 } from '../types/mtg'
 
@@ -17,14 +19,30 @@ import type {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      Accept: 'application/json',
-      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    ...init,
-  })
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+      ...init,
+    })
+  } catch (err) {
+    throw new Error(
+      `Não foi possível conectar ao backend em ${API_BASE_URL || window.location.origin}. ` +
+        'Verifique se o Spring Boot está rodando em http://localhost:8080. ' +
+        `(${err instanceof Error ? err.message : String(err)})`,
+    )
+  }
   if (!res.ok) {
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      throw new Error(
+        `Backend indisponível (HTTP ${res.status}). ` +
+          'O proxy do Vite não conseguiu alcançar o Spring Boot. ' +
+          'Verifique se a aplicação Java está rodando em http://localhost:8080.',
+      )
+    }
     let details = ''
     try {
       details = await res.text()
@@ -66,6 +84,20 @@ export interface UpdateCardInput {
   foil: boolean
   language: string
   quantity: number
+  /**
+   * Campos adicionais editáveis na tela Cartas.
+   *
+   * - `undefined` / ausente → backend mantém o valor atual (não troca).
+   * - `""` → limpa o campo (backend persiste `null`).
+   * - Qualquer outro valor → grava.
+   *
+   * Para `price`, `null` também significa "não alterar" porque o backend
+   * diferencia `null` (não setado) de números via `BigDecimal`.
+   */
+  card_type?: string
+  price?: number | null
+  comentario?: string
+  localizacao?: string
 }
 
 export const api = {
@@ -110,6 +142,77 @@ export const api = {
     }),
   deleteCard: (id: number) =>
     request<void>(`/api/collection/cards/${id}`, { method: 'DELETE' }),
+  syncCard: (id: number) =>
+    request<CollectionCard>(`/api/collection/cards/${id}/sync`, { method: 'POST' }),
+
+  // Collection data dumps (point-in-time snapshots of the collection)
+  createCollectionDump: () =>
+    request<{ data_dump_date_time: string }>('/api/collection/datadumps', {
+      method: 'POST',
+    }),
+  listCollectionDumps: () =>
+    request<string[]>('/api/collection/datadumps'),
+  listCardsFromDump: (timestamp: string) =>
+    request<CollectionCard[]>(
+      `/api/collection/datadumps/${encodeURIComponent(timestamp)}/cards`,
+    ),
+  deleteCollectionDump: (timestamp: string) =>
+    request<void>(`/api/collection/datadumps/${encodeURIComponent(timestamp)}`, {
+      method: 'DELETE',
+    }),
+  dumpTotalValues: (params: { from?: string; to?: string }) => {
+    const qs = new URLSearchParams()
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<Array<{ data_dump_date_time: string; total_value: number }>>(
+      `/api/collection/datadumps/stats/total-value${suffix}`,
+    )
+  },
+  dumpPriceMovers: (params: { from?: string; to?: string; limit?: number }): Promise<PriceMoversResponse | undefined> => {
+    const qs = new URLSearchParams()
+    if (params.from) qs.set('from', params.from)
+    if (params.to) qs.set('to', params.to)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<PriceMoversResponse>(
+      `/api/collection/datadumps/stats/price-movers${suffix}`,
+    )
+  },
+
+  // Collection import (async)
+  importCollection: async (file: File): Promise<ImportJobSnapshot> => {
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch(`${API_BASE_URL}/api/collection/import`, {
+      method: 'POST',
+      body,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(
+        `Falha ao iniciar import: HTTP ${res.status}${text ? ` — ${text}` : ''}`,
+      )
+    }
+    return (await res.json()) as ImportJobSnapshot
+  },
+  importStatus: (jobId: string) =>
+    request<ImportJobSnapshot>(
+      `/api/collection/import/${encodeURIComponent(jobId)}/status`,
+    ),
+  importDownloadUrl: (jobId: string) =>
+    `${API_BASE_URL}/api/collection/import/${encodeURIComponent(jobId)}/download`,
+
+  // Set icons
+  setIconUrl: (code: string) =>
+    `${API_BASE_URL}/api/sets/${encodeURIComponent(code)}/icon`,
+  syncSetIcons: () => request<{ synced: number }>('/api/sets/sync-icons', { method: 'POST' }),
+
+  // Card images
+  cardImageUrl: (id: number, face = 0) =>
+    `${API_BASE_URL}/api/collection/cards/${id}/image?face=${face}`,
+  cardImageInfo: (id: number) =>
+    request<{ face_count: number; layout: string }>(`/api/collection/cards/${id}/image/info`),
 
   // Prices
   priceByName: (name: string, set: string, foil: boolean) =>

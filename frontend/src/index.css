@@ -2,8 +2,9 @@
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
     Arial, sans-serif;
   line-height: 1.5;
-  color: #222;
-  background-color: #fff;
+  /* Cores reais vêm de App.css (paleta "Light Papel"). Aqui só
+   * declaramos o color-scheme para ajustar scrollbars/form controls. */
+  color-scheme: light;
 }
 
 * {

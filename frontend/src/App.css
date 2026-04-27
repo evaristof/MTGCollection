@@ -1,11 +1,23 @@
 :root {
-  --bg: #0f1115;
-  --bg-alt: #181b22;
-  --border: #2a2f3a;
-  --fg: #e7e9ee;
-  --muted: #8a93a4;
-  --accent: #6aa1ff;
-  --danger: #e06767;
+  /* Light "Papel" palette — fundo claro com acento azul-cobalto.
+   * Os RGBs abaixo (--accent-rgb / --danger-rgb) existem para overlays
+   * em rgba() ao longo do CSS. */
+  --bg: #ffffff;
+  --bg-alt: #f5f6f8;
+  --bg-raised: #ffffff;
+  --border: #d8dde6;
+  --border-strong: #b9c0cd;
+  --fg: #1f2430;
+  --fg-soft: #3a4252;
+  --muted: #6b7384;
+  --accent: #2b6cb0;
+  --accent-strong: #1e4e85;
+  --accent-rgb: 43, 108, 176;
+  --accent-fg: #ffffff;
+  --danger: #c53030;
+  --danger-rgb: 197, 48, 48;
+  --sidebar-width: 230px;
+  --sidebar-width-collapsed: 64px;
 }
 
 * {
@@ -23,59 +35,186 @@ body,
 }
 
 .app {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
   min-height: 100vh;
+  transition: grid-template-columns 0.2s ease;
 }
 
-.app__header {
+.app--collapsed {
+  grid-template-columns: var(--sidebar-width-collapsed) 1fr;
+}
+
+/* ---------- Sidebar ---------- */
+
+/* Sidebar tem seu próprio tema (Navy / Azul-marinho), independente do
+ * resto da app que continua claro. Variáveis abaixo só valem dentro
+ * da .sidebar. Quem quiser trocar a paleta do menu mexe só aqui. */
+.sidebar {
+  --sb-bg: #182645;
+  --sb-fg: #e6ecf7;
+  --sb-fg-soft: #b9c5da;
+  --sb-muted: #7d89a3;
+  --sb-border: #233358;
+  --sb-raised: #1f3057;
+  --sb-accent: #ffb454;
+  --sb-accent-strong: #ffc987;
+  --sb-active-bg: rgba(255, 180, 84, 0.18);
+  --sb-active-border: rgba(255, 180, 84, 0.4);
+  --sb-hover-bg: rgba(255, 255, 255, 0.06);
+
+  background: var(--sb-bg);
+  color: var(--sb-fg);
+  border-right: 1px solid var(--sb-border);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sidebar__top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
-  padding: 1rem 2rem;
-  background: var(--bg-alt);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.app__brand h1 {
-  margin: 0;
-  font-size: 1.25rem;
-}
-
-.app__nav {
-  display: flex;
   gap: 0.5rem;
+  padding: 1rem 0.75rem;
+  border-bottom: 1px solid var(--sb-border);
+  min-height: 64px;
 }
 
-.app__nav a {
-  padding: 0.5rem 1rem;
+.app--collapsed .sidebar__top {
+  justify-content: center;
+  padding: 1rem 0.5rem;
+}
+
+.sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  overflow: hidden;
+}
+
+.sidebar__brand strong {
+  color: var(--sb-fg);
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+
+.sidebar__brand .muted {
+  color: var(--sb-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar__brand-logo {
+  display: block;
+  margin-top: 0.5rem;
+  width: 100%;
+  max-width: 150px;
+  height: auto;
+  object-fit: contain;
+  /* Painel creme atrás do logo: dá contraste pros traços escuros / vermelhos
+   * do "Magic: The Gathering" sobre o navy da sidebar, sem mexer na arte. */
+  background: #f8f2e1;
+  padding: 8px 10px;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.sidebar__toggle {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
   border-radius: 6px;
-  color: var(--muted);
+  border: 1px solid var(--sb-border);
+  background: var(--sb-raised);
+  color: var(--sb-fg-soft);
+  cursor: pointer;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+/* :not(:disabled) is necessary so this rule beats the global
+ * `button:hover:not(:disabled)` (specificity 0,2,1). Without it, the
+ * global rule wins and the toggle hover would show the page's blue
+ * accent instead of the sidebar's amber. */
+.sidebar__toggle:hover:not(:disabled) {
+  border-color: var(--sb-accent);
+  color: var(--sb-accent-strong);
+}
+
+.sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem 0.5rem;
+}
+
+.sidebar__nav a {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 6px;
+  color: var(--sb-fg-soft);
   text-decoration: none;
   font-weight: 500;
-  transition: background 0.15s, color 0.15s;
+  border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
 
-.app__nav a:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--fg);
+.sidebar__nav a:hover {
+  background: var(--sb-hover-bg);
+  color: var(--sb-fg);
 }
 
-.app__nav a.active {
-  background: rgba(106, 161, 255, 0.15);
-  color: var(--accent);
+.sidebar__nav a.active {
+  background: var(--sb-active-bg);
+  color: var(--sb-accent-strong);
+  border-color: var(--sb-active-border);
 }
+
+.sidebar__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  width: 20px;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.app--collapsed .sidebar__nav a {
+  justify-content: center;
+  padding: 0.55rem;
+}
+
+.app--collapsed .sidebar__label {
+  display: none;
+}
+
+/* ---------- Main content ---------- */
 
 .app__main {
-  flex: 1;
-  padding: 1.5rem 2rem 3rem;
+  padding: 1.75rem 2rem 3rem;
+  min-width: 0;
 }
 
 .page {
-  max-width: 1200px;
-  margin: 0 auto;
+  /* Let the page use the full available width of the main column so tables
+   * with many columns (Cartas) aren't capped at ~1200px on wide screens. */
+  max-width: none;
+  width: 100%;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
@@ -84,14 +223,15 @@ body,
 .page h2 {
   margin: 0;
   font-size: 1.4rem;
+  color: var(--fg);
 }
 
 .page h3 {
   margin: 0 0 0.75rem;
-  font-size: 1rem;
-  color: var(--muted);
+  font-size: 0.82rem;
+  color: var(--fg-soft);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .toolbar {
@@ -109,24 +249,53 @@ body,
   flex-wrap: wrap;
 }
 
+/* ---------- Inputs and buttons ---------- */
+
 button,
 input,
 select {
   font: inherit;
   color: var(--fg);
   border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-alt);
-  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-raised);
+  padding: 0.5rem 0.8rem;
+}
+
+input::placeholder {
+  color: var(--muted);
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
 }
 
 button {
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  color: var(--fg);
 }
 
 button:hover:not(:disabled) {
   border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: var(--accent-fg);
 }
 
 button:disabled {
@@ -135,18 +304,21 @@ button:disabled {
 }
 
 button.danger {
-  border-color: rgba(224, 103, 103, 0.35);
+  border-color: rgba(var(--danger-rgb), 0.45);
   color: var(--danger);
 }
 
 button.danger:hover:not(:disabled) {
-  background: rgba(224, 103, 103, 0.1);
+  background: rgba(var(--danger-rgb), 0.10);
   border-color: var(--danger);
+  color: var(--danger);
 }
 
 input[type='search'] {
   min-width: 240px;
 }
+
+/* ---------- Forms ---------- */
 
 .form {
   background: var(--bg-alt);
@@ -161,19 +333,29 @@ input[type='search'] {
 
 .form__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 0.75rem 1rem;
+}
+
+/* Inside the form grid, combos should fill their grid cell instead of forcing
+ * their own 320px min-width (which caused the Set field to overlap neighbors).
+ * The popover keeps its own larger max-width so long names still fit. */
+.form__grid .combo {
+  display: block;
+  min-width: 0;
+  width: 100%;
 }
 
 .form__grid label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.3rem;
 }
 
 .form__grid label > span {
-  font-size: 0.78rem;
-  color: var(--muted);
+  font-size: 0.8rem;
+  color: var(--fg-soft);
+  font-weight: 500;
 }
 
 .form__grid label.checkbox {
@@ -190,43 +372,52 @@ input[type='search'] {
   flex-wrap: wrap;
 }
 
+/* ---------- Tables ---------- */
+
 .table-wrapper {
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: 8px;
+  background: var(--bg-alt);
 }
 
 table {
   width: 100%;
+  /* Minimum width so the many-column "Cartas" grid doesn't squish and cut
+   * columns off. The .table-wrapper still scrolls horizontally on narrow
+   * viewports below this width. */
+  min-width: 1280px;
   border-collapse: collapse;
 }
 
 th,
 td {
   text-align: left;
-  padding: 0.55rem 0.9rem;
+  padding: 0.6rem 0.9rem;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  color: var(--fg);
 }
 
 thead th {
-  background: var(--bg-alt);
+  background: var(--bg-raised);
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
+  letter-spacing: 0.06em;
+  color: var(--fg-soft);
 }
 
 tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--accent-rgb), 0.07);
 }
 
 code {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(0, 0, 0, 0.06);
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
   font-size: 0.85em;
+  color: var(--fg);
 }
 
 .muted {
@@ -235,20 +426,361 @@ code {
 
 .error {
   color: var(--danger);
-  background: rgba(224, 103, 103, 0.08);
-  padding: 0.5rem 0.75rem;
+  background: rgba(var(--danger-rgb), 0.08);
+  padding: 0.6rem 0.85rem;
   border-radius: 6px;
-  border: 1px solid rgba(224, 103, 103, 0.3);
+  border: 1px solid rgba(var(--danger-rgb), 0.35);
+  font-weight: 500;
 }
 
 .actions {
   display: flex;
   gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.actions button {
+  white-space: nowrap;
 }
 
 label.inline {
   display: inline-flex;
   align-items: center;
+  gap: 0.4rem;
   font-size: 0.9rem;
-  color: var(--muted);
+  color: var(--fg-soft);
+}
+
+/* ---------- Combobox (SetCombo) ---------- */
+
+.combo {
+  position: relative;
+  display: inline-block;
+  min-width: 320px;
+}
+
+.combo__button {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.combo__button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.combo__button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.combo__button[aria-expanded='true'] {
+  border-color: var(--accent);
+}
+
+.combo__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.combo__arrow {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  color: var(--fg-soft);
+}
+
+.combo__popover {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(560px, 90vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-alt);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.combo__search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: none;
+  border-bottom: 1px solid var(--border-strong);
+  font: inherit;
+  outline: none;
+}
+
+.combo__search:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.combo__list {
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+}
+
+.combo__option {
+  padding: 0.45rem 0.65rem;
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.combo__option--active {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
+.combo__option--selected {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.combo__option--empty {
+  color: var(--fg-soft);
+  cursor: default;
+  font-style: italic;
+}
+
+/* ---------- Sortable headers ---------- */
+
+thead th[aria-sort] {
+  padding: 0;
+}
+
+.sort-th {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: space-between;
+  padding: 0.6rem 0.9rem;
+  background: transparent;
+  border: none;
+  color: var(--fg-soft);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.sort-th:hover {
+  color: var(--accent-strong);
+  background: rgba(var(--accent-rgb), 0.08);
+}
+
+.sort-th:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.sort-th--active {
+  color: var(--accent-strong);
+}
+
+.sort-th__arrow {
+  font-size: 0.7rem;
+  opacity: 0.55;
+}
+
+.sort-th--active .sort-th__arrow {
+  opacity: 1;
+}
+
+/* ---------- Pagination ---------- */
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.25rem;
+}
+
+.pagination__info {
+  font-size: 0.85rem;
+}
+
+.pagination__nav {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.pagination__page {
+  font-size: 0.85rem;
+  color: var(--fg-soft);
+  padding: 0 0.4rem;
+  white-space: nowrap;
+}
+
+.pagination button {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+/* ---------- Modal (Import collection dialog) ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal {
+  background: var(--bg-alt);
+  color: var(--fg);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  min-width: 320px;
+  max-width: 560px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  overflow: hidden;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal__header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.modal__close {
+  background: transparent;
+  border: none;
+  color: var(--fg-soft);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+}
+
+.modal__close:hover {
+  color: var(--fg);
+}
+
+.modal__body {
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.modal__body > * + * {
+  margin-top: 0.75rem;
+}
+
+.modal__footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.progress {
+  width: 100%;
+  height: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.progress__bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.import-errors {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.import-errors summary {
+  cursor: pointer;
+  color: var(--fg-soft);
+}
+
+.import-errors ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 640px) {
+  :root {
+    --sidebar-width: var(--sidebar-width-collapsed);
+  }
+
+  .app {
+    grid-template-columns: var(--sidebar-width-collapsed) 1fr;
+  }
+
+  .sidebar__brand {
+    display: none;
+  }
+
+  .sidebar__label {
+    display: none;
+  }
+
+  .sidebar__nav a {
+    justify-content: center;
+    padding: 0.55rem;
+  }
+
+  .app__main {
+    padding: 1rem 1rem 2rem;
+  }
 }

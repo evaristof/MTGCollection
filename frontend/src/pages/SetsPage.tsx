@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type SetInput } from '../api/client'
 import type { MagicSet } from '../types/mtg'
+import { useTableControls } from '../hooks/useTableControls'
+import { SortableTh } from '../components/SortableTh'
+import { PaginationBar } from '../components/PaginationBar'
+import { SetIcon } from '../components/SetIcon'
 
 type FormState = SetInput & { _editingCode?: string | null }
 
@@ -50,7 +54,6 @@ export default function SetsPage() {
   const [syncing, setSyncing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState('')
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
 
   const loadSets = useCallback(async () => {
@@ -71,16 +74,81 @@ export default function SetsPage() {
     void loadSets()
   }, [loadSets])
 
+  // Os campos do form de set viram também filtros live do grid: cada campo
+  // preenchido restringe as linhas visíveis. Campos vazios / null /
+  // <= 0 (para números) não filtram. Em modo de edição (set_code travado)
+  // não aplicamos filtros — a intenção ali é editar a linha daquele set,
+  // não navegar na listagem.
   const filteredSets = useMemo(() => {
-    const q = filter.trim().toLowerCase()
-    if (!q) return sets
-    return sets.filter(
-      (s) =>
-        s.set_code.toLowerCase().includes(q) ||
-        s.set_name.toLowerCase().includes(q) ||
-        (s.block_name ?? '').toLowerCase().includes(q),
-    )
-  }, [sets, filter])
+    if (form._editingCode) return sets
+    const codeQ = form.set_code.trim().toLowerCase()
+    const nameQ = form.set_name.trim().toLowerCase()
+    const dateQ = (form.release_date ?? '').toString().trim()
+    const typeQ = (form.set_type ?? '').toString().trim().toLowerCase()
+    const blockCodeQ = (form.block_code ?? '').toString().trim().toLowerCase()
+    const blockNameQ = (form.block_name ?? '').toString().trim().toLowerCase()
+    const cardCountQ =
+      form.card_count === null || form.card_count === undefined
+        ? null
+        : Number(form.card_count)
+    const printedSizeQ =
+      form.printed_size === null || form.printed_size === undefined
+        ? null
+        : Number(form.printed_size)
+    const anyFilter =
+      codeQ ||
+      nameQ ||
+      dateQ ||
+      typeQ ||
+      blockCodeQ ||
+      blockNameQ ||
+      (cardCountQ !== null && cardCountQ > 0) ||
+      (printedSizeQ !== null && printedSizeQ > 0)
+    if (!anyFilter) return sets
+    return sets.filter((s) => {
+      if (codeQ && !s.set_code.toLowerCase().includes(codeQ)) return false
+      if (nameQ && !s.set_name.toLowerCase().includes(nameQ)) return false
+      if (dateQ && (s.release_date ?? '') !== dateQ) return false
+      if (typeQ && !(s.set_type ?? '').toLowerCase().includes(typeQ)) return false
+      if (blockCodeQ && !(s.block_code ?? '').toLowerCase().includes(blockCodeQ)) return false
+      if (blockNameQ && !(s.block_name ?? '').toLowerCase().includes(blockNameQ)) return false
+      if (cardCountQ !== null && cardCountQ > 0 && s.card_count !== cardCountQ) return false
+      if (printedSizeQ !== null && printedSizeQ > 0 && s.printed_size !== printedSizeQ)
+        return false
+      return true
+    })
+  }, [sets, form])
+
+  // Reset para a primeira página sempre que qualquer filtro mudar.
+  const filterKey = form._editingCode
+    ? `edit:${form._editingCode}`
+    : [
+        form.set_code,
+        form.set_name,
+        form.release_date,
+        form.set_type,
+        form.card_count ?? '',
+        form.printed_size ?? '',
+        form.block_code,
+        form.block_name,
+      ].join('|')
+
+  const {
+    pageRows,
+    totalCount,
+    pageCount,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    sortKey,
+    sortDirection,
+    toggleSort,
+  } = useTableControls<MagicSet>({
+    rows: filteredSets,
+    initialSortKey: 'set_code',
+    resetKey: filterKey,
+  })
 
   const onSync = async () => {
     setSyncing(true)
@@ -151,12 +219,6 @@ export default function SetsPage() {
       <div className="toolbar">
         <h2>Sets {loading && <span className="muted">(carregando…)</span>}</h2>
         <div className="toolbar__actions">
-          <input
-            type="search"
-            placeholder="Filtrar por código / nome / bloco"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
           <button onClick={() => void loadSets()} disabled={loading}>
             Recarregar
           </button>
@@ -169,7 +231,16 @@ export default function SetsPage() {
       {error && <p className="error">{error}</p>}
 
       <form className="form" onSubmit={onSubmit}>
-        <h3>{form._editingCode ? `Editar set ${form._editingCode}` : 'Novo set'}</h3>
+        <h3>
+          {form._editingCode ? `Editar set ${form._editingCode}` : 'Novo set / filtrar sets'}
+        </h3>
+        {!form._editingCode && (
+          <p className="muted">
+            Os campos abaixo também filtram o grid conforme você digita. Clique em{' '}
+            <strong>Criar set</strong> para cadastrar um novo com esses valores (precisa de{' '}
+            <code>code</code> e <code>name</code>).
+          </p>
+        )}
         <div className="form__grid">
           <label>
             <span>Code*</span>
@@ -249,46 +320,64 @@ export default function SetsPage() {
         </div>
       </form>
 
-      {filteredSets.length === 0 && !loading && (
+      {totalCount === 0 && !loading && (
         <p className="muted">
           Nenhum set encontrado. Use “Sincronizar do Scryfall” ou crie um manualmente no formulário acima.
         </p>
       )}
 
-      {filteredSets.length > 0 && (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Released</th>
-                <th>Type</th>
-                <th>Cards</th>
-                <th>Block</th>
-                <th style={{ width: 160 }}>Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredSets.map((s) => (
-                <tr key={s.set_code}>
-                  <td><code>{s.set_code}</code></td>
-                  <td>{s.set_name}</td>
-                  <td>{s.release_date ?? '-'}</td>
-                  <td>{s.set_type ?? '-'}</td>
-                  <td>{s.card_count ?? '-'}</td>
-                  <td>{s.block_name ?? '-'}</td>
-                  <td className="actions">
-                    <button type="button" onClick={() => onEdit(s)}>Editar</button>
-                    <button type="button" className="danger" onClick={() => void onDelete(s.set_code)}>
-                      Deletar
-                    </button>
-                  </td>
+      {totalCount > 0 && (
+        <>
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ width: 40 }}>Icon</th>
+                  <SortableTh<MagicSet> label="Code" field="set_code" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Name" field="set_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Released" field="release_date" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Type" field="set_type" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Cards" field="card_count" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Printed" field="printed_size" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Block code" field="block_code" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <SortableTh<MagicSet> label="Block" field="block_name" sortKey={sortKey} sortDirection={sortDirection} onToggle={toggleSort} />
+                  <th style={{ width: 160 }}>Ações</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {pageRows.map((s) => (
+                  <tr key={s.set_code}>
+                    <td style={{ textAlign: 'center' }}>
+                      <SetIcon setCode={s.set_code} setName={s.set_name} />
+                    </td>
+                    <td><code>{s.set_code}</code></td>
+                    <td>{s.set_name}</td>
+                    <td>{s.release_date ?? '-'}</td>
+                    <td>{s.set_type ?? '-'}</td>
+                    <td>{s.card_count ?? '-'}</td>
+                    <td>{s.printed_size ?? '-'}</td>
+                    <td>{s.block_code ?? '-'}</td>
+                    <td>{s.block_name ?? '-'}</td>
+                    <td className="actions">
+                      <button type="button" onClick={() => onEdit(s)}>Editar</button>
+                      <button type="button" className="danger" onClick={() => void onDelete(s.set_code)}>
+                        Deletar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <PaginationBar
+            page={page}
+            pageCount={pageCount}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
+        </>
       )}
     </section>
   )

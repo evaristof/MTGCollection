@@ -5,7 +5,7 @@ Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Bo
 ## Stack
 
 **Back-end**
-- Java 17
+- Java 21
 - Spring Boot 3.2 (Web + Data JPA + Validation)
 - Hibernate
 - H2 (banco em memória)
@@ -17,10 +17,19 @@ Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Bo
 - React Router DOM
 - CSS minimalista (sem libs de UI — podemos trocar por Mantine/Chakra depois)
 
+## Estrutura do repositório
+
+```
+.
+├── backend/     # Spring Boot (pom.xml + src/)
+└── frontend/    # React + Vite + TypeScript
+```
+
 ## Como rodar
 
 ```bash
 # backend
+cd backend
 mvn spring-boot:run
 
 # frontend (em outro terminal)
@@ -33,11 +42,61 @@ A aplicação Java sobe em `http://localhost:8080`. O console H2 fica em `http:/
 
 Em produção do front, defina `VITE_API_BASE_URL` apontando para a URL absoluta do backend.
 
+## Troubleshooting — `Cannot assign requested address: getsockopt`
+
+Em algumas máquinas (principalmente Windows) o JVM falha ao abrir sockets TCP com:
+
+```
+Cannot assign requested address: getsockopt
+```
+
+É sintoma de IPv6 quebrado. Aparece em dois momentos diferentes:
+
+1. **Durante `mvn …`** (resolvendo dependências) — resolve via `MAVEN_OPTS` (ver abaixo).
+2. **Durante a aplicação rodando** (ex.: ao clicar "Sincronizar do Scryfall") — a aplicação já força IPv4 no `main()` e no plugin `spring-boot-maven-plugin`, então `mvn spring-boot:run` e `java -jar target/…` já sobem com IPv4. Se você rodar pela **IDE** (IntelliJ / Eclipse), adicione os mesmos flags em *VM options* da Run Configuration:
+   ```
+   -Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true
+   ```
+   No IntelliJ: `Run → Edit Configurations… → MtgCollectionApplication → VM options`.
+
+### `MAVEN_OPTS` (para builds no Windows)
+
+**Via GUI (Variáveis de Ambiente):**
+1. Menu Iniciar → *"Editar as variáveis de ambiente do sistema"*
+2. Botão **"Variáveis de Ambiente…"**
+3. Em *"Variáveis de usuário"* → **Novo…**
+   - **Nome:** `MAVEN_OPTS`
+   - **Valor:** `-Djava.net.preferIPv4Stack=true`
+4. OK em tudo → **feche e reabra** o terminal / a IDE
+5. Confirmar: `echo %MAVEN_OPTS%` deve imprimir `-Djava.net.preferIPv4Stack=true`
+
+**Via PowerShell (equivalente, persistente):**
+```powershell
+setx MAVEN_OPTS "-Djava.net.preferIPv4Stack=true"
+```
+
+> `MAVEN_OPTS` não precisa ir no `PATH` — são variáveis independentes. Se você já tem um `MAVEN_OPTS` (ex.: `-Xmx2g`), concatene: `-Xmx2g -Djava.net.preferIPv4Stack=true`.
+
+### `MAVEN_OPTS` (Linux / macOS)
+
+```bash
+export MAVEN_OPTS="-Djava.net.preferIPv4Stack=true"
+# adicione a linha acima ao seu ~/.bashrc / ~/.zshrc pra ficar permanente
+```
+
+Depois rode novamente:
+
+```bash
+mvn -U clean install
+```
+
+O `-U` força o Maven a tentar baixar as dependências que falharam antes.
+
 ## Como testar
 
 ```bash
-mvn test        # back-end
-cd frontend && npm run lint && npm run build
+cd backend && mvn test                         # back-end
+cd frontend && npm run lint && npm run build   # front-end
 ```
 
 ## Endpoints
