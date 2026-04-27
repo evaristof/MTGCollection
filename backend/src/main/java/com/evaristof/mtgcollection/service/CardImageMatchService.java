@@ -13,20 +13,17 @@ import jakarta.annotation.PreDestroy;
 import nu.pattern.OpenCV;
 import org.opencv.calib3d.Calib3d;
 import org.opencv.core.Core;
-import org.opencv.core.CvType;
 import org.opencv.core.DMatch;
 import org.opencv.core.Mat;
 import org.opencv.core.MatOfByte;
 import org.opencv.core.MatOfDMatch;
 import org.opencv.core.MatOfKeyPoint;
-import org.opencv.core.MatOfPoint;
 import org.opencv.core.MatOfPoint2f;
 import org.opencv.core.Size;
 import org.opencv.features2d.BFMatcher;
 import org.opencv.features2d.ORB;
 import org.opencv.imgcodecs.Imgcodecs;
 import org.opencv.imgproc.Imgproc;
-import org.opencv.imgproc.CLAHE;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
@@ -63,15 +60,15 @@ public class CardImageMatchService {
 
     private static final Logger log = LoggerFactory.getLogger(CardImageMatchService.class);
     private static final int HASH_BIT_RESOLUTION = 64;
-    private static final int PHASH_SHORTLIST_SIZE = 12;
-    private static final double PHASH_SHORTLIST_DISTANCE = 0.45;
+    private static final int PHASH_SHORTLIST_SIZE = 25;
+    private static final double PHASH_SHORTLIST_DISTANCE = 0.50;
     private static final double PHASH_DIRECT_MATCH_DISTANCE = 0.10;
     private static final int ORB_FEATURES = 1500;
     private static final float ORB_RATIO_TEST = 0.75f;
     private static final int MIN_ORB_GOOD_MATCHES = 10;
     private static final int MIN_ORB_INLIERS = 8;
     private static final double MIN_HYBRID_CONFIDENCE = 0.35;
-    private static final int MAX_IMAGE_DIMENSION = 1400;
+    private static final int ORB_TARGET_HEIGHT = 700;
 
     private final CardImageHashRepository hashRepository;
     private final MagicSetRepository setRepository;
@@ -117,10 +114,8 @@ public class CardImageMatchService {
     }
 
     public MatchResult findBestMatch(BufferedImage uploadedImage) {
-        BufferedImage processedImage = preprocessUploadedImage(uploadedImage);
-
         PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
-        Hash uploadedHash = hasher.hash(processedImage);
+        Hash uploadedHash = hasher.hash(uploadedImage);
         BigInteger uploadedValue = uploadedHash.getHashValue();
         int actualBitLength = uploadedHash.getBitResolution();
 
@@ -156,7 +151,7 @@ public class CardImageMatchService {
                     continue;
                 }
 
-                OrbValidationResult orbResult = computeOrbValidation(processedImage, referenceImage);
+                OrbValidationResult orbResult = computeOrbValidation(uploadedImage, referenceImage);
                 double confidence = combineConfidence(candidate.pHashDistance(), orbResult.score());
                 if (confidence > bestConfidence) {
                     bestCandidate = candidate;
@@ -472,217 +467,6 @@ public class CardImageMatchService {
         return (pHashScore * 0.35) + (orbScore * 0.65);
     }
 
-    private BufferedImage preprocessUploadedImage(BufferedImage original) {
-        Mat src = bufferedImageToMat(original);
-        Mat cropped = null;
-        boolean usedCrop = false;
-        try {
-            cropped = detectAndCropCard(src);
-            if (cropped != null) {
-                usedCrop = true;
-                Mat normalized = applyCLAHE(cropped);
-                try {
-                    return matToBufferedImage(normalized);
-                } finally {
-                    normalized.release();
-                }
-            }
-            Mat normalized = applyCLAHE(src);
-            try {
-                return matToBufferedImage(normalized);
-            } finally {
-                normalized.release();
-            }
-        } finally {
-            src.release();
-            if (usedCrop && cropped != null) {
-                cropped.release();
-            }
-        }
-    }
-
-    private Mat detectAndCropCard(Mat src) {
-        Mat gray = new Mat();
-        Mat blurred = new Mat();
-        Mat edges = new Mat();
-        Mat hierarchy = new Mat();
-        try {
-            Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
-            Imgproc.GaussianBlur(gray, blurred, new Size(5, 5), 0);
-            Imgproc.Canny(blurred, edges, 50, 150);
-
-            Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(3, 3));
-            Imgproc.dilate(edges, edges, kernel);
-            kernel.release();
-
-            List<MatOfPoint> contours = new ArrayList<>();
-            Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-
-            double srcArea = src.rows() * src.cols();
-            double minCardArea = srcArea * 0.10;
-            double maxCardArea = srcArea * 0.95;
-
-            MatOfPoint2f bestApprox = null;
-            double bestArea = 0;
-
-            for (MatOfPoint contour : contours) {
-                MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
-                double peri = Imgproc.arcLength(contour2f, true);
-                MatOfPoint2f approx = new MatOfPoint2f();
-                Imgproc.approxPolyDP(contour2f, approx, 0.02 * peri, true);
-                contour2f.release();
-
-                if (approx.rows() == 4) {
-                    double area = Imgproc.contourArea(approx);
-                    if (area > minCardArea && area < maxCardArea && area > bestArea) {
-                        if (bestApprox != null) {
-                            bestApprox.release();
-                        }
-                        bestApprox = approx;
-                        bestArea = area;
-                    } else {
-                        approx.release();
-                    }
-                } else {
-                    approx.release();
-                }
-                contour.release();
-            }
-
-            if (bestApprox == null) {
-                return null;
-            }
-
-            try {
-                return fourPointTransform(src, bestApprox);
-            } finally {
-                bestApprox.release();
-            }
-        } finally {
-            gray.release();
-            blurred.release();
-            edges.release();
-            hierarchy.release();
-        }
-    }
-
-    private Mat fourPointTransform(Mat src, MatOfPoint2f points) {
-        org.opencv.core.Point[] pts = points.toArray();
-        org.opencv.core.Point[] ordered = orderPoints(pts);
-
-        double widthTop = distance(ordered[0], ordered[1]);
-        double widthBottom = distance(ordered[3], ordered[2]);
-        int maxWidth = (int) Math.max(widthTop, widthBottom);
-
-        double heightLeft = distance(ordered[0], ordered[3]);
-        double heightRight = distance(ordered[1], ordered[2]);
-        int maxHeight = (int) Math.max(heightLeft, heightRight);
-
-        if (maxWidth < 50 || maxHeight < 50) {
-            return null;
-        }
-
-        Mat srcPoints = new Mat(4, 1, CvType.CV_32FC2);
-        srcPoints.put(0, 0,
-                ordered[0].x, ordered[0].y,
-                ordered[1].x, ordered[1].y,
-                ordered[2].x, ordered[2].y,
-                ordered[3].x, ordered[3].y);
-
-        Mat dstPoints = new Mat(4, 1, CvType.CV_32FC2);
-        dstPoints.put(0, 0,
-                0, 0,
-                maxWidth - 1, 0,
-                maxWidth - 1, maxHeight - 1,
-                0, maxHeight - 1);
-
-        Mat transform = Imgproc.getPerspectiveTransform(srcPoints, dstPoints);
-        Mat warped = new Mat();
-        try {
-            Imgproc.warpPerspective(src, warped, transform, new Size(maxWidth, maxHeight));
-            return warped;
-        } catch (Exception e) {
-            warped.release();
-            throw e;
-        } finally {
-            srcPoints.release();
-            dstPoints.release();
-            transform.release();
-        }
-    }
-
-    private org.opencv.core.Point[] orderPoints(org.opencv.core.Point[] pts) {
-        org.opencv.core.Point[] ordered = new org.opencv.core.Point[4];
-        double[] sums = new double[4];
-        double[] diffs = new double[4];
-        for (int i = 0; i < 4; i++) {
-            sums[i] = pts[i].x + pts[i].y;
-            diffs[i] = pts[i].x - pts[i].y;
-        }
-        int tlIdx = 0, brIdx = 0, trIdx = 0, blIdx = 0;
-        for (int i = 1; i < 4; i++) {
-            if (sums[i] < sums[tlIdx]) tlIdx = i;
-            if (sums[i] > sums[brIdx]) brIdx = i;
-            if (diffs[i] > diffs[trIdx]) trIdx = i;
-            if (diffs[i] < diffs[blIdx]) blIdx = i;
-        }
-        ordered[0] = pts[tlIdx];
-        ordered[1] = pts[trIdx];
-        ordered[2] = pts[brIdx];
-        ordered[3] = pts[blIdx];
-        return ordered;
-    }
-
-    private double distance(org.opencv.core.Point a, org.opencv.core.Point b) {
-        return Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
-    }
-
-    private Mat applyCLAHE(Mat src) {
-        Mat gray = new Mat();
-        boolean srcIsColor = src.channels() > 1;
-        if (srcIsColor) {
-            Imgproc.cvtColor(src, gray, Imgproc.COLOR_BGR2GRAY);
-        } else {
-            src.copyTo(gray);
-        }
-        CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
-        Mat result = new Mat();
-        try {
-            clahe.apply(gray, result);
-            return result;
-        } catch (Exception e) {
-            result.release();
-            throw e;
-        } finally {
-            gray.release();
-        }
-    }
-
-    private Mat bufferedImageToMat(BufferedImage image) {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        try {
-            ImageIO.write(image, "png", output);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to encode image", e);
-        }
-        MatOfByte bytes = new MatOfByte(output.toByteArray());
-        Mat decoded = Imgcodecs.imdecode(bytes, Imgcodecs.IMREAD_COLOR);
-        bytes.release();
-        return decoded;
-    }
-
-    private BufferedImage matToBufferedImage(Mat mat) {
-        MatOfByte bytes = new MatOfByte();
-        Imgcodecs.imencode(".png", mat, bytes);
-        try {
-            return ImageIO.read(new ByteArrayInputStream(bytes.toArray()));
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to decode Mat to BufferedImage", e);
-        } finally {
-            bytes.release();
-        }
-    }
-
     private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
                                                      BufferedImage referenceImage) throws IOException {
         Mat source = toNormalizedGrayMat(sourceImage);
@@ -785,16 +569,14 @@ public class CardImageMatchService {
         boolean success = false;
         try {
             Imgproc.cvtColor(decoded, gray, Imgproc.COLOR_BGR2GRAY);
-            if (gray.cols() > MAX_IMAGE_DIMENSION || gray.rows() > MAX_IMAGE_DIMENSION) {
-                double scale = Math.min(
-                        (double) MAX_IMAGE_DIMENSION / gray.cols(),
-                        (double) MAX_IMAGE_DIMENSION / gray.rows());
+            double scale = (double) ORB_TARGET_HEIGHT / gray.rows();
+            if (Math.abs(scale - 1.0) > 0.05) {
                 Mat resized = new Mat();
-                Imgproc.resize(gray, resized, new org.opencv.core.Size(), scale, scale, Imgproc.INTER_AREA);
+                Imgproc.resize(gray, resized, new Size(), scale, scale, Imgproc.INTER_AREA);
                 gray.release();
                 gray = resized;
             }
-            Imgproc.equalizeHist(gray, gray);
+            Imgproc.createCLAHE(2.0, new Size(8, 8)).apply(gray, gray);
             success = true;
             return gray;
         } finally {
