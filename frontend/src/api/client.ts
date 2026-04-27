@@ -242,7 +242,7 @@ export const api = {
   },
 
   scannerSyncImages: (setCode: string) =>
-    request<void>(`/api/scanner/sync-images?set=${encodeURIComponent(setCode)}`, {
+    request<{ status: string; message: string }>(`/api/scanner/sync-images?set=${encodeURIComponent(setCode)}`, {
       method: 'POST',
     }),
 

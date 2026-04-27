@@ -16,6 +16,7 @@ export default function ScannerPage() {
   const [scannedCards, setScannedCards] = useState<ScannedCard[]>([])
   const [error, setError] = useState<string | null>(null)
   const [populateStatus, setPopulateStatus] = useState<string | null>(null)
+  const [populateRunning, setPopulateRunning] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -71,12 +72,18 @@ export default function ScannerPage() {
   }
 
   const onPopulateHashes = async () => {
+    setPopulateRunning(true)
     setPopulateStatus('Populando hashes a partir das imagens do MinIO…')
     setError(null)
     try {
       await api.scannerPopulateHashes()
       setPopulateStatus('Processo de população de hashes iniciado em background. Aguarde alguns minutos e tente escanear.')
+      setTimeout(() => {
+        setPopulateRunning(false)
+        setPopulateStatus(null)
+      }, 30000)
     } catch (err) {
+      setPopulateRunning(false)
       setPopulateStatus(null)
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -96,7 +103,7 @@ export default function ScannerPage() {
         <p className="muted">
           Popula a tabela de hashes a partir das imagens já armazenadas no MinIO.
         </p>
-        <button className="btn" onClick={onPopulateHashes} disabled={loading || populateStatus !== null}>
+        <button className="btn" onClick={onPopulateHashes} disabled={loading || populateRunning}>
           Popular Hashes do MinIO
         </button>
       </div>

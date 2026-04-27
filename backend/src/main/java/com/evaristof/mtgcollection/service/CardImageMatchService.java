@@ -48,6 +48,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
 public class CardImageMatchService {
@@ -75,6 +76,8 @@ public class CardImageMatchService {
     private final Gson gson;
     private final HttpClient imageHttpClient;
     private final ConcurrentMap<String, List<SetCardFileEntry>> setCardFileIndexCache = new ConcurrentHashMap<>();
+    private final AtomicBoolean syncRunning = new AtomicBoolean(false);
+    private final AtomicBoolean populateRunning = new AtomicBoolean(false);
 
     public record MatchResult(CardImageHash card, double confidence) {}
 
@@ -183,12 +186,28 @@ public class CardImageMatchService {
 
     @Async
     public void syncImagesFromScryfallAsync(String setCode) {
-        syncImagesFromScryfall(setCode);
+        if (!syncRunning.compareAndSet(false, true)) {
+            log.warn("Sync already running, ignoring request for set: {}", setCode);
+            return;
+        }
+        try {
+            syncImagesFromScryfall(setCode);
+        } finally {
+            syncRunning.set(false);
+        }
     }
 
     @Async
     public void populateHashesFromMinioAsync() {
-        populateHashesFromMinio();
+        if (!populateRunning.compareAndSet(false, true)) {
+            log.warn("Populate already running, ignoring request");
+            return;
+        }
+        try {
+            populateHashesFromMinio();
+        } finally {
+            populateRunning.set(false);
+        }
     }
 
     public int populateHashesFromMinio() {
@@ -259,13 +278,25 @@ public class CardImageMatchService {
         }
 
         String fileWithoutExt = file.replaceFirst("\\.[^.]+$", "");
-        List<SetCardFileEntry> candidates = setCardFileIndexCache.computeIfAbsent(setCode, this::loadSetCardFileIndex);
+        List<SetCardFileEntry> candidates = getSetCardFileIndex(setCode);
         for (SetCardFileEntry candidate : candidates) {
             if (candidate.sanitizedFileStem().equals(fileWithoutExt)) {
                 return new ParsedObjectKey(setCode, candidate.collectorNumber(), candidate.cardName());
             }
         }
         return null;
+    }
+
+    private List<SetCardFileEntry> getSetCardFileIndex(String setCode) {
+        List<SetCardFileEntry> cached = setCardFileIndexCache.get(setCode);
+        if (cached != null && !cached.isEmpty()) {
+            return cached;
+        }
+        List<SetCardFileEntry> loaded = loadSetCardFileIndex(setCode);
+        if (!loaded.isEmpty()) {
+            setCardFileIndexCache.put(setCode, loaded);
+        }
+        return loaded;
     }
 
     private List<SetCardFileEntry> loadSetCardFileIndex(String setCode) {
@@ -528,6 +559,7 @@ public class CardImageMatchService {
         MatOfByte bytes = new MatOfByte(output.toByteArray());
         Mat decoded = Imgcodecs.imdecode(bytes, Imgcodecs.IMREAD_COLOR);
         Mat gray = new Mat();
+        boolean success = false;
         try {
             Imgproc.cvtColor(decoded, gray, Imgproc.COLOR_BGR2GRAY);
             if (gray.cols() > MAX_IMAGE_DIMENSION || gray.rows() > MAX_IMAGE_DIMENSION) {
@@ -535,19 +567,19 @@ public class CardImageMatchService {
                         (double) MAX_IMAGE_DIMENSION / gray.cols(),
                         (double) MAX_IMAGE_DIMENSION / gray.rows());
                 Mat resized = new Mat();
-                try {
-                    Imgproc.resize(gray, resized, new org.opencv.core.Size(), scale, scale, Imgproc.INTER_AREA);
-                    gray.release();
-                    gray = resized.clone();
-                } finally {
-                    resized.release();
-                }
+                Imgproc.resize(gray, resized, new org.opencv.core.Size(), scale, scale, Imgproc.INTER_AREA);
+                gray.release();
+                gray = resized;
             }
             Imgproc.equalizeHist(gray, gray);
+            success = true;
             return gray;
         } finally {
             decoded.release();
             bytes.release();
+            if (!success) {
+                gray.release();
+            }
         }
     }
 }
