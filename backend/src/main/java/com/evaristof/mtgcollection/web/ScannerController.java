@@ -86,6 +86,21 @@ public class ScannerController {
         }
     }
 
+    @PostMapping("/populate-hashes")
+    public ResponseEntity<Map<String, String>> populateHashes() {
+        try {
+            matchService.populateHashesFromMinioAsync();
+            return ResponseEntity.accepted().body(Map.of(
+                    "status", "accepted",
+                    "message", "Hash population from MinIO started"));
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
+            return ResponseEntity.internalServerError().body(Map.of(
+                    "status", "error",
+                    "message", msg));
+        }
+    }
+
     @GetMapping("/image/{setCode}/{collectorNumber}")
     public ResponseEntity<ByteArrayResource> getImage(@PathVariable String setCode,
                                                       @PathVariable String collectorNumber) {

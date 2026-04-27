@@ -251,4 +251,9 @@ export const api = {
     request<void>(`/api/scanner/sync-images?set=${encodeURIComponent(setCode)}`, {
       method: 'POST',
     }),
+
+  scannerPopulateHashes: () =>
+    request<{ status: string; message: string }>('/api/scanner/populate-hashes', {
+      method: 'POST',
+    }),
 }

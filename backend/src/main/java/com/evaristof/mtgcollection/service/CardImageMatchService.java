@@ -114,6 +114,84 @@ public class CardImageMatchService {
         syncImagesFromScryfall(setCode);
     }
 
+    @Async
+    public void populateHashesFromMinioAsync() {
+        populateHashesFromMinio();
+    }
+
+    public int populateHashesFromMinio() {
+        List<String> objectKeys = minioStorage.listAllObjectKeys();
+        int count = 0;
+
+        for (String objectKey : objectKeys) {
+            try {
+                ParsedObjectKey parsed = parseObjectKey(objectKey);
+                if (parsed == null) {
+                    log.debug("Skipping unparseable key: {}", objectKey);
+                    continue;
+                }
+
+                if (hashRepository.findBySetCodeAndCollectorNumber(
+                        parsed.setCode, parsed.collectorNumber).isPresent()) {
+                    log.debug("Hash already exists for {}/{}, skipping", parsed.setCode, parsed.collectorNumber);
+                    continue;
+                }
+
+                byte[] imageData = minioStorage.download(objectKey);
+                BufferedImage image = ImageIO.read(new ByteArrayInputStream(imageData));
+                if (image == null) {
+                    log.warn("Could not decode image for key: {}", objectKey);
+                    continue;
+                }
+
+                String hash = computeHash(image);
+                CardImageHash entity = new CardImageHash();
+                entity.setSetCode(parsed.setCode);
+                entity.setCollectorNumber(parsed.collectorNumber);
+                entity.setCardName(parsed.cardName);
+                entity.setPHash(hash);
+                entity.setMinioPath(objectKey);
+                hashRepository.save(entity);
+                count++;
+
+                log.info("Populated hash for {}/{} ({})", parsed.setCode, parsed.collectorNumber, parsed.cardName);
+            } catch (Exception e) {
+                log.warn("Failed to process MinIO object '{}': {}", objectKey, e.getMessage());
+            }
+        }
+
+        log.info("Populated {} hashes from MinIO bucket", count);
+        return count;
+    }
+
+    private record ParsedObjectKey(String setCode, String collectorNumber, String cardName) {}
+
+    private ParsedObjectKey parseObjectKey(String objectKey) {
+        // Expected format: "<setName> - <setCode>/<collectorNumber>-<cardName>.png"
+        int slashIdx = objectKey.indexOf('/');
+        if (slashIdx < 0) return null;
+
+        String folder = objectKey.substring(0, slashIdx);
+        String file = objectKey.substring(slashIdx + 1);
+
+        // Extract setCode from folder: "Core Set 2020 - m20" -> "m20"
+        int dashSpaceIdx = folder.lastIndexOf(" - ");
+        if (dashSpaceIdx < 0) return null;
+        String setCode = folder.substring(dashSpaceIdx + 3).trim();
+
+        // Extract collectorNumber and cardName from file: "150-Lightning Bolt.png"
+        String fileWithoutExt = file.replaceFirst("\\.[^.]+$", "");
+        int firstDash = fileWithoutExt.indexOf('-');
+        if (firstDash < 0) return null;
+
+        String collectorNumber = fileWithoutExt.substring(0, firstDash);
+        String cardName = fileWithoutExt.substring(firstDash + 1);
+
+        if (setCode.isEmpty() || collectorNumber.isEmpty()) return null;
+
+        return new ParsedObjectKey(setCode, collectorNumber, cardName);
+    }
+
     public void syncImagesFromScryfall(String setCode) {
         try {
             String searchPath = "/cards/search?q=" +

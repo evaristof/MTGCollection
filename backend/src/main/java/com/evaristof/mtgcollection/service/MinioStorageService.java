@@ -2,11 +2,14 @@ package com.evaristof.mtgcollection.service;
 
 import io.minio.BucketExistsArgs;
 import io.minio.GetObjectArgs;
+import io.minio.ListObjectsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.Result;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
+import io.minio.messages.Item;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +18,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Abstracts MinIO operations: bucket initialisation, upload, existence check
@@ -117,6 +122,26 @@ public class MinioStorageService {
         } catch (Exception e) {
             throw new RuntimeException("Failed to download '" + objectKey + "' from MinIO", e);
         }
+    }
+
+    /**
+     * Lists all object keys in the bucket.
+     */
+    public List<String> listAllObjectKeys() {
+        List<String> keys = new ArrayList<>();
+        try {
+            for (Result<Item> result : minioClient.listObjects(
+                    ListObjectsArgs.builder().bucket(bucket).recursive(true).build())) {
+                keys.add(result.get().objectName());
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to list objects in bucket '" + bucket + "'", e);
+        }
+        return keys;
+    }
+
+    public String getBucket() {
+        return bucket;
     }
 
     private static String sanitise(String input) {
