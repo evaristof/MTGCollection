@@ -147,12 +147,12 @@ public class CardImageMatchService {
         }
 
         Map<String, String> imageUris = (Map<String, String>) cardMap.get("image_uris");
-        if (imageUris == null || !imageUris.containsKey("normal")) {
-            log.debug("No image_uris.normal for {}/{}, skipping", setCode, collectorNumber);
+        if (imageUris == null || !imageUris.containsKey("png")) {
+            log.debug("No image_uris.png for {}/{}, skipping", setCode, collectorNumber);
             return;
         }
 
-        String imageUrl = imageUris.get("normal");
+        String imageUrl = imageUris.get("png");
         byte[] imageData = downloadImage(imageUrl);
         BufferedImage image = ImageIO.read(new ByteArrayInputStream(imageData));
         if (image == null) {
