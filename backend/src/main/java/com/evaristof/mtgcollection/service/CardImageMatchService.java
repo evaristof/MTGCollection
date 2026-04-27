@@ -469,7 +469,13 @@ public class CardImageMatchService {
     private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
                                                      BufferedImage referenceImage) throws IOException {
         Mat source = toNormalizedGrayMat(sourceImage);
-        Mat reference = toNormalizedGrayMat(referenceImage);
+        Mat reference;
+        try {
+            reference = toNormalizedGrayMat(referenceImage);
+        } catch (IOException | RuntimeException e) {
+            source.release();
+            throw e;
+        }
         MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
         MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
         Mat sourceDescriptors = new Mat();
