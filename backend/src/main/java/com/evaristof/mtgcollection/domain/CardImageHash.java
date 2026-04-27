@@ -6,9 +6,10 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
-@Table(name = "CARD_IMAGE_HASH")
+@Table(name = "CARD_IMAGE_HASH", uniqueConstraints = @UniqueConstraint(columnNames = {"SET_CODE", "COLLECTOR_NUMBER"}))
 public class CardImageHash {
 
     @Id
