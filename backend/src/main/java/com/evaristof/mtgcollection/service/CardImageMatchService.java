@@ -46,6 +46,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 @Service
 public class CardImageMatchService {
@@ -72,6 +74,7 @@ public class CardImageMatchService {
     private final ScryfallHttpClient scryfallClient;
     private final Gson gson;
     private final HttpClient imageHttpClient;
+    private final ConcurrentMap<String, List<SetCardFileEntry>> setCardFileIndexCache = new ConcurrentHashMap<>();
 
     public record MatchResult(CardImageHash card, double confidence) {}
 
@@ -235,6 +238,8 @@ public class CardImageMatchService {
 
     private record ParsedObjectKey(String setCode, String collectorNumber, String cardName) {}
 
+    private record SetCardFileEntry(String collectorNumber, String cardName, String sanitizedFileStem) {}
+
     private ParsedObjectKey parseObjectKey(String objectKey) {
         int slashIdx = objectKey.indexOf('/');
         if (slashIdx < 0) {
@@ -249,20 +254,62 @@ public class CardImageMatchService {
             return null;
         }
         String setCode = folder.substring(dashSpaceIdx + 3).trim();
+        if (setCode.isEmpty()) {
+            return null;
+        }
 
         String fileWithoutExt = file.replaceFirst("\\.[^.]+$", "");
-        int firstDash = fileWithoutExt.indexOf('-');
-        if (firstDash < 0) {
-            return null;
+        List<SetCardFileEntry> candidates = setCardFileIndexCache.computeIfAbsent(setCode, this::loadSetCardFileIndex);
+        for (SetCardFileEntry candidate : candidates) {
+            if (candidate.sanitizedFileStem().equals(fileWithoutExt)) {
+                return new ParsedObjectKey(setCode, candidate.collectorNumber(), candidate.cardName());
+            }
         }
+        return null;
+    }
 
-        String collectorNumber = fileWithoutExt.substring(0, firstDash);
-        String cardName = fileWithoutExt.substring(firstDash + 1);
-        if (setCode.isEmpty() || collectorNumber.isEmpty()) {
-            return null;
+    private List<SetCardFileEntry> loadSetCardFileIndex(String setCode) {
+        try {
+            List<SetCardFileEntry> entries = new ArrayList<>();
+            String searchPath = "/cards/search?q=" +
+                    URLEncoder.encode("set:" + setCode, StandardCharsets.UTF_8) +
+                    "&unique=prints";
+            String currentPage = searchPath;
+            while (currentPage != null) {
+                String json = scryfallClient.get(currentPage);
+                Map<String, Object> response = gson.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> data = (List<Map<String, Object>>) response.get("data");
+                if (data == null) {
+                    break;
+                }
+                for (Map<String, Object> cardMap : data) {
+                    String collectorNumber = (String) cardMap.get("collector_number");
+                    String cardName = (String) cardMap.get("name");
+                    if (collectorNumber == null || collectorNumber.isBlank() || cardName == null || cardName.isBlank()) {
+                        continue;
+                    }
+                    entries.add(new SetCardFileEntry(
+                            collectorNumber,
+                            cardName,
+                            collectorNumber + "-" + sanitizeObjectKeyPart(cardName)));
+                }
+                Boolean hasMore = (Boolean) response.get("has_more");
+                String nextPage = (String) response.get("next_page");
+                currentPage = Boolean.TRUE.equals(hasMore) ? nextPage : null;
+            }
+            return entries;
+        } catch (Exception e) {
+            log.warn("Failed to load Scryfall filename index for set {}: {}", setCode, e.getMessage());
+            return List.of();
         }
+    }
 
-        return new ParsedObjectKey(setCode, collectorNumber, cardName);
+    private String sanitizeObjectKeyPart(String input) {
+        if (input == null) {
+            return "unknown";
+        }
+        return input.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
     }
 
     public void syncImagesFromScryfall(String setCode) {
@@ -397,27 +444,31 @@ public class CardImageMatchService {
         Mat sourceDescriptors = new Mat();
         Mat referenceDescriptors = new Mat();
         Mat inlierMask = new Mat();
+        Mat noMask = new Mat();
+        ORB orb = ORB.create(ORB_FEATURES);
+        BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
         try {
-            ORB orb = ORB.create(ORB_FEATURES);
-            orb.detectAndCompute(source, new Mat(), sourceKeypoints, sourceDescriptors);
-            orb.detectAndCompute(reference, new Mat(), referenceKeypoints, referenceDescriptors);
+            orb.detectAndCompute(source, noMask, sourceKeypoints, sourceDescriptors);
+            orb.detectAndCompute(reference, noMask, referenceKeypoints, referenceDescriptors);
             if (sourceDescriptors.empty() || referenceDescriptors.empty()) {
                 return new OrbValidationResult(0.0, 0, 0);
             }
 
-            BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
             List<MatOfDMatch> knnMatches = new ArrayList<>();
             matcher.knnMatch(sourceDescriptors, referenceDescriptors, knnMatches, 2);
-
             List<DMatch> goodMatches = new ArrayList<>();
             for (MatOfDMatch matchGroup : knnMatches) {
-                DMatch[] matches = matchGroup.toArray();
-                if (matches.length < 2) {
-                    continue;
-                }
-                if (matches[0].distance < ORB_RATIO_TEST * matches[1].distance) {
-                    goodMatches.add(matches[0]);
+                try {
+                    DMatch[] matches = matchGroup.toArray();
+                    if (matches.length < 2) {
+                        continue;
+                    }
+                    if (matches[0].distance < ORB_RATIO_TEST * matches[1].distance) {
+                        goodMatches.add(matches[0]);
+                    }
+                } finally {
+                    matchGroup.release();
                 }
             }
 
@@ -465,6 +516,9 @@ public class CardImageMatchService {
             sourceDescriptors.release();
             referenceDescriptors.release();
             inlierMask.release();
+            noMask.release();
+            matcher.clear();
+            orb.clear();
         }
     }
 
