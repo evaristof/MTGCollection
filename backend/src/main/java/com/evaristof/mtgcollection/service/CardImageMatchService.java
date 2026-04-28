@@ -141,46 +141,38 @@ public class CardImageMatchService {
         OrbValidationResult bestOrbResult = null;
         double bestConfidence = -1.0;
 
-        Mat sourceArt = null;
-        try {
-            sourceArt = prepareSourceArt(uploadedImage);
-            for (CardImageHash card : shortlistCards) {
-                try {
-                    byte[] referenceBytes = minioStorage.download(card.getMinioPath());
-                    BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
-                    if (referenceImage == null) {
-                        continue;
-                    }
-
-                    OrbValidationResult orbResult = computeOrbValidation(sourceArt, referenceImage);
-
-                    double pHashDist = normalizedHammingDistance(
-                            uploadedValue,
-                            new BigInteger(card.getPHash(), 16),
-                            actualBitLength);
-                    double confidence = combineConfidence(pHashDist, orbResult.score());
-
-                    if (uploadedEmbedding != null && card.getCnnEmbedding() != null) {
-                        float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
-                        double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
-                        double cnnBoost = Math.max(0.0, (cnnSim - 0.5) * 0.10);
-                        confidence = Math.min(1.0, confidence + cnnBoost);
-                    }
-
-                    if (confidence > bestConfidence) {
-                        bestCard = card;
-                        bestOrbResult = orbResult;
-                        bestConfidence = confidence;
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to validate candidate {}/{}: {}",
-                            card.getSetCode(), card.getCollectorNumber(), e.getMessage());
+        for (CardImageHash card : shortlistCards) {
+            try {
+                byte[] referenceBytes = minioStorage.download(card.getMinioPath());
+                BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
+                if (referenceImage == null) {
+                    continue;
                 }
+
+                OrbValidationResult orbResult = computeOrbValidation(uploadedImage, referenceImage);
+
+                double pHashDist = normalizedHammingDistance(
+                        uploadedValue,
+                        new BigInteger(card.getPHash(), 16),
+                        actualBitLength);
+                double confidence = combineConfidence(pHashDist, orbResult.score());
+
+                if (uploadedEmbedding != null && card.getCnnEmbedding() != null) {
+                    float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
+                    double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
+                    double cnnBoost = Math.max(0.0, (cnnSim - 0.5) * 0.10);
+                    confidence = Math.min(1.0, confidence + cnnBoost);
+                }
+
+                if (confidence > bestConfidence) {
+                    bestCard = card;
+                    bestOrbResult = orbResult;
+                    bestConfidence = confidence;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to validate candidate {}/{}: {}",
+                        card.getSetCode(), card.getCollectorNumber(), e.getMessage());
             }
-        } catch (IOException e) {
-            log.warn("Failed to prepare source image for ORB: {}", e.getMessage());
-        } finally {
-            if (sourceArt != null) sourceArt.release();
         }
 
         if (bestCard == null || bestOrbResult == null) {
@@ -482,18 +474,11 @@ public class CardImageMatchService {
 
 
 
-    private Mat prepareSourceArt(BufferedImage sourceImage) throws IOException {
-        Mat sourceFull = toNormalizedGrayMat(sourceImage);
-        try {
-            return extractArtRegion(sourceFull);
-        } finally {
-            sourceFull.release();
-        }
-    }
-
-    private OrbValidationResult computeOrbValidation(Mat sourceArt,
+    private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
                                                      BufferedImage referenceImage) throws IOException {
+        Mat sourceFull = null;
         Mat referenceFull = null;
+        Mat source = null;
         Mat reference = null;
         MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
         MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
@@ -505,12 +490,16 @@ public class CardImageMatchService {
         BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
         try {
+            sourceFull = toNormalizedGrayMat(sourceImage);
             referenceFull = toNormalizedGrayMat(referenceImage);
+            source = extractArtRegion(sourceFull);
             reference = extractArtRegion(referenceFull);
+            sourceFull.release();
+            sourceFull = null;
             referenceFull.release();
             referenceFull = null;
 
-            orb.detectAndCompute(sourceArt, noMask, sourceKeypoints, sourceDescriptors);
+            orb.detectAndCompute(source, noMask, sourceKeypoints, sourceDescriptors);
             orb.detectAndCompute(reference, noMask, referenceKeypoints, referenceDescriptors);
             if (sourceDescriptors.empty() || referenceDescriptors.empty()) {
                 return new OrbValidationResult(0.0, 0, 0);
@@ -570,7 +559,9 @@ public class CardImageMatchService {
             double score = Math.max(inlierScore, matchScore * 0.75);
             return new OrbValidationResult(score, goodMatches.size(), inliers);
         } finally {
+            if (sourceFull != null) sourceFull.release();
             if (referenceFull != null) referenceFull.release();
+            if (source != null) source.release();
             if (reference != null) reference.release();
             sourceKeypoints.release();
             referenceKeypoints.release();
