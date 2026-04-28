@@ -164,7 +164,7 @@ public class CardImageMatchService {
                         float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
                         double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
                         double cnnBoost = Math.max(0.0, (cnnSim - 0.5) * 0.10);
-                        confidence += cnnBoost;
+                        confidence = Math.min(1.0, confidence + cnnBoost);
                     }
 
                     if (confidence > bestConfidence) {
