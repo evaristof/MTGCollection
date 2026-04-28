@@ -332,6 +332,10 @@ public class CardImageMatchService {
                 currentPage = Boolean.TRUE.equals(hasMore) ? nextPage : null;
             }
             return entries;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted loading Scryfall filename index for set {}", setCode);
+            return List.of();
         } catch (Exception e) {
             log.warn("Failed to load Scryfall filename index for set {}: {}", setCode, e.getMessage());
             return List.of();
@@ -470,7 +474,7 @@ public class CardImageMatchService {
 
     private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
                                                      BufferedImage referenceImage) throws IOException {
-        Mat sourceFull = toNormalizedGrayMat(sourceImage);
+        Mat sourceFull = null;
         Mat referenceFull = null;
         Mat source = null;
         Mat reference = null;
@@ -484,6 +488,7 @@ public class CardImageMatchService {
         BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
         try {
+            sourceFull = toNormalizedGrayMat(sourceImage);
             referenceFull = toNormalizedGrayMat(referenceImage);
             source = extractArtRegion(sourceFull);
             reference = extractArtRegion(referenceFull);
@@ -594,7 +599,12 @@ public class CardImageMatchService {
                 gray.release();
                 gray = resized;
             }
-            Imgproc.createCLAHE(2.0, new Size(8, 8)).apply(gray, gray);
+            org.opencv.imgproc.CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
+            try {
+                clahe.apply(gray, gray);
+            } finally {
+                clahe.collectGarbage();
+            }
             success = true;
             return gray;
         } finally {
