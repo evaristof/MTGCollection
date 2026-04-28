@@ -128,15 +128,6 @@ public class CardImageMatchService {
         List<CardImageHash> shortlistCards = buildPHashShortlist(allHashes, uploadedValue, actualBitLength);
         log.debug("pHash shortlist: {} candidates", shortlistCards.size());
 
-        float[] uploadedEmbedding = null;
-        if (cnnEmbeddingService.isAvailable()) {
-            try {
-                uploadedEmbedding = cnnEmbeddingService.extractArtEmbedding(uploadedImage);
-            } catch (Exception e) {
-                log.debug("CNN embedding extraction failed: {}", e.getMessage());
-            }
-        }
-
         CardImageHash bestCard = null;
         OrbValidationResult bestOrbResult = null;
         double bestConfidence = -1.0;
@@ -156,13 +147,6 @@ public class CardImageMatchService {
                         new BigInteger(card.getPHash(), 16),
                         actualBitLength);
                 double confidence = combineConfidence(pHashDist, orbResult.score());
-
-                if (uploadedEmbedding != null && card.getCnnEmbedding() != null) {
-                    float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
-                    double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
-                    double cnnBoost = Math.max(0.0, (cnnSim - 0.5) * 0.10);
-                    confidence = Math.min(1.0, confidence + cnnBoost);
-                }
 
                 if (confidence > bestConfidence) {
                     bestCard = card;
@@ -449,16 +433,8 @@ public class CardImageMatchService {
     }
 
     private void computeAndSetEmbedding(CardImageHash entity, BufferedImage image) {
-        if (!cnnEmbeddingService.isAvailable()) {
-            return;
-        }
-        try {
-            float[] embedding = cnnEmbeddingService.extractArtEmbedding(image);
-            entity.setCnnEmbedding(CnnEmbeddingService.embeddingToBase64(embedding));
-        } catch (Exception e) {
-            log.warn("Failed to compute CNN embedding for {}/{}: {}",
-                    entity.getSetCode(), entity.getCollectorNumber(), e.getMessage());
-        }
+        // CNN embedding disabled: DJL/ONNX Runtime native libs conflict with OpenCV on Windows.
+        // CNN embeddings can be populated by an external Python/CLI tool if needed.
     }
 
     private double normalizedHammingDistance(BigInteger a, BigInteger b, int bitLength) {
