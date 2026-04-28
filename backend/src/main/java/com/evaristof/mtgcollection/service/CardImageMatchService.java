@@ -135,14 +135,20 @@ public class CardImageMatchService {
             }
         }
 
-        List<CardImageHash> shortlistCards;
+        List<CardImageHash> shortlistCards = null;
         if (uploadedEmbedding != null) {
             shortlistCards = buildCnnShortlist(allHashes, uploadedEmbedding);
             log.debug("CNN shortlist: {} candidates", shortlistCards.size());
-        } else {
+        }
+        if (shortlistCards == null || shortlistCards.isEmpty()) {
             shortlistCards = buildPHashShortlist(allHashes, uploadedImage);
             log.debug("pHash shortlist: {} candidates", shortlistCards.size());
         }
+
+        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
+        Hash uploadedHash = hasher.hash(uploadedImage);
+        BigInteger uploadedValue = uploadedHash.getHashValue();
+        int actualBitLength = uploadedHash.getBitResolution();
 
         CardImageHash bestCard = null;
         OrbValidationResult bestOrbResult = null;
@@ -164,12 +170,10 @@ public class CardImageMatchService {
                     double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
                     confidence = combineCnnOrbConfidence(cnnSim, orbResult.score());
                 } else {
-                    PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
-                    Hash uploadedHash = hasher.hash(uploadedImage);
                     double pHashDist = normalizedHammingDistance(
-                            uploadedHash.getHashValue(),
+                            uploadedValue,
                             new BigInteger(card.getPHash(), 16),
-                            uploadedHash.getBitResolution());
+                            actualBitLength);
                     confidence = combineConfidence(pHashDist, orbResult.score());
                 }
 
