@@ -2,12 +2,9 @@ package com.evaristof.mtgcollection.service;
 
 import ai.djl.MalformedModelException;
 import ai.djl.inference.Predictor;
-import ai.djl.modality.cv.Image;
-import ai.djl.modality.cv.ImageFactory;
 import ai.djl.ndarray.NDArray;
 import ai.djl.ndarray.NDList;
 import ai.djl.ndarray.NDManager;
-import ai.djl.ndarray.types.DataType;
 import ai.djl.ndarray.types.Shape;
 import ai.djl.repository.zoo.Criteria;
 import ai.djl.repository.zoo.ModelNotFoundException;
@@ -146,15 +143,28 @@ public class CnnEmbeddingService {
         @Override
         public NDList processInput(TranslatorContext ctx, BufferedImage input) {
             NDManager manager = ctx.getNDManager();
-            Image djlImage = ImageFactory.getInstance().fromImage(input);
-            djlImage = djlImage.resize(INPUT_SIZE, INPUT_SIZE, false);
-            NDArray array = djlImage.toNDArray(manager, Image.Flag.COLOR);
-            array = array.toType(DataType.FLOAT32, false).div(255.0f);
-            array = array.transpose(2, 0, 1);
-            NDArray mean = manager.create(MEAN, new Shape(3, 1, 1));
-            NDArray std = manager.create(STD, new Shape(3, 1, 1));
-            array = array.sub(mean).div(std);
-            return new NDList(array.expandDims(0));
+            java.awt.Image scaled = input.getScaledInstance(INPUT_SIZE, INPUT_SIZE, java.awt.Image.SCALE_SMOOTH);
+            BufferedImage resized = new BufferedImage(INPUT_SIZE, INPUT_SIZE, BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = resized.createGraphics();
+            g.drawImage(scaled, 0, 0, null);
+            g.dispose();
+
+            float[] data = new float[3 * INPUT_SIZE * INPUT_SIZE];
+            for (int y = 0; y < INPUT_SIZE; y++) {
+                for (int x = 0; x < INPUT_SIZE; x++) {
+                    int rgb = resized.getRGB(x, y);
+                    float r = ((rgb >> 16) & 0xFF) / 255.0f;
+                    float g2 = ((rgb >> 8) & 0xFF) / 255.0f;
+                    float b = (rgb & 0xFF) / 255.0f;
+                    int offset = y * INPUT_SIZE + x;
+                    data[offset] = (r - MEAN[0]) / STD[0];
+                    data[INPUT_SIZE * INPUT_SIZE + offset] = (g2 - MEAN[1]) / STD[1];
+                    data[2 * INPUT_SIZE * INPUT_SIZE + offset] = (b - MEAN[2]) / STD[2];
+                }
+            }
+
+            NDArray array = manager.create(data, new Shape(1, 3, INPUT_SIZE, INPUT_SIZE));
+            return new NDList(array);
         }
 
         @Override
