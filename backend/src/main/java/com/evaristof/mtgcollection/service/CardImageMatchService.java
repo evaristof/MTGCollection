@@ -471,17 +471,9 @@ public class CardImageMatchService {
     private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
                                                      BufferedImage referenceImage) throws IOException {
         Mat sourceFull = toNormalizedGrayMat(sourceImage);
-        Mat referenceFull;
-        try {
-            referenceFull = toNormalizedGrayMat(referenceImage);
-        } catch (IOException | RuntimeException e) {
-            sourceFull.release();
-            throw e;
-        }
-        Mat source = extractArtRegion(sourceFull);
-        Mat reference = extractArtRegion(referenceFull);
-        sourceFull.release();
-        referenceFull.release();
+        Mat referenceFull = null;
+        Mat source = null;
+        Mat reference = null;
         MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
         MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
         Mat sourceDescriptors = new Mat();
@@ -492,6 +484,14 @@ public class CardImageMatchService {
         BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
         try {
+            referenceFull = toNormalizedGrayMat(referenceImage);
+            source = extractArtRegion(sourceFull);
+            reference = extractArtRegion(referenceFull);
+            sourceFull.release();
+            sourceFull = null;
+            referenceFull.release();
+            referenceFull = null;
+
             orb.detectAndCompute(source, noMask, sourceKeypoints, sourceDescriptors);
             orb.detectAndCompute(reference, noMask, referenceKeypoints, referenceDescriptors);
             if (sourceDescriptors.empty() || referenceDescriptors.empty()) {
@@ -552,8 +552,10 @@ public class CardImageMatchService {
             double score = Math.max(inlierScore, matchScore * 0.75);
             return new OrbValidationResult(score, goodMatches.size(), inliers);
         } finally {
-            source.release();
-            reference.release();
+            if (sourceFull != null) sourceFull.release();
+            if (referenceFull != null) referenceFull.release();
+            if (source != null) source.release();
+            if (reference != null) reference.release();
             sourceKeypoints.release();
             referenceKeypoints.release();
             sourceDescriptors.release();
