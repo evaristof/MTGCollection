@@ -603,7 +603,12 @@ public class CardImageMatchService {
         int artLeft = (int) (w * 0.05);
         int artRight = (int) (w * 0.95);
         Rect artRect = new Rect(artLeft, artTop, artRight - artLeft, artBottom - artTop);
-        return gray.submat(artRect).clone();
+        Mat sub = gray.submat(artRect);
+        try {
+            return sub.clone();
+        } finally {
+            sub.release();
+        }
     }
 
     private Mat toNormalizedGrayMat(BufferedImage image) throws IOException {
