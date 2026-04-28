@@ -93,6 +93,18 @@ export interface PriceMoversResponse {
 }
 
 /**
+ * Response from POST /api/scanner/match.
+ */
+export interface ScannerMatchResult {
+  matched: boolean
+  card_name: string | null
+  set_code: string | null
+  collector_number: string | null
+  confidence: number
+  image_url: string | null
+}
+
+/**
  * Shape of a price lookup response (GET /api/prices/by-name or /by-number).
  */
 export interface CardPrice {

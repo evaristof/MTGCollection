@@ -7,6 +7,7 @@ import HomePage from './pages/HomePage.tsx'
 import SetsPage from './pages/SetsPage.tsx'
 import CardsPage from './pages/CardsPage.tsx'
 import ChartsPage from './pages/ChartsPage.tsx'
+import ScannerPage from './pages/ScannerPage.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="sets" element={<SetsPage />} />
           <Route path="cards" element={<CardsPage />} />
           <Route path="charts" element={<ChartsPage />} />
+          <Route path="scanner" element={<ScannerPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
