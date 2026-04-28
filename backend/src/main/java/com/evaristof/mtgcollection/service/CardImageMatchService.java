@@ -48,8 +48,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Service
@@ -78,7 +76,6 @@ public class CardImageMatchService {
     private final CnnEmbeddingService cnnEmbeddingService;
     private final Gson gson;
     private final HttpClient imageHttpClient;
-    private final ConcurrentMap<String, List<SetCardFileEntry>> setCardFileIndexCache = new ConcurrentHashMap<>();
     private final AtomicBoolean syncRunning = new AtomicBoolean(false);
     private final AtomicBoolean populateRunning = new AtomicBoolean(false);
 
@@ -315,8 +312,6 @@ public class CardImageMatchService {
 
     private record ParsedObjectKey(String setCode, String collectorNumber, String cardName) {}
 
-    private record SetCardFileEntry(String collectorNumber, String cardName, String sanitizedFileStem) {}
-
     private ParsedObjectKey parseObjectKey(String objectKey) {
         int slashIdx = objectKey.indexOf('/');
         if (slashIdx < 0) {
@@ -336,73 +331,26 @@ public class CardImageMatchService {
         }
 
         String fileWithoutExt = file.replaceFirst("\\.[^.]+$", "");
-        List<SetCardFileEntry> candidates = getSetCardFileIndex(setCode);
-        for (SetCardFileEntry candidate : candidates) {
-            if (candidate.sanitizedFileStem().equals(fileWithoutExt)) {
-                return new ParsedObjectKey(setCode, candidate.collectorNumber(), candidate.cardName());
+        int splitIdx = findCollectorNameSplit(fileWithoutExt);
+        if (splitIdx < 0) {
+            return null;
+        }
+        String collectorNumber = fileWithoutExt.substring(0, splitIdx);
+        String cardName = fileWithoutExt.substring(splitIdx + 1);
+        if (collectorNumber.isEmpty() || cardName.isEmpty()) {
+            return null;
+        }
+        return new ParsedObjectKey(setCode, collectorNumber, cardName);
+    }
+
+    private int findCollectorNameSplit(String fileStem) {
+        for (int i = 0; i < fileStem.length(); i++) {
+            if (fileStem.charAt(i) == '-' && i + 1 < fileStem.length()
+                    && Character.isLetter(fileStem.charAt(i + 1))) {
+                return i;
             }
         }
-        return null;
-    }
-
-    private List<SetCardFileEntry> getSetCardFileIndex(String setCode) {
-        List<SetCardFileEntry> cached = setCardFileIndexCache.get(setCode);
-        if (cached != null && !cached.isEmpty()) {
-            return cached;
-        }
-        List<SetCardFileEntry> loaded = loadSetCardFileIndex(setCode);
-        if (!loaded.isEmpty()) {
-            setCardFileIndexCache.put(setCode, loaded);
-        }
-        return loaded;
-    }
-
-    private List<SetCardFileEntry> loadSetCardFileIndex(String setCode) {
-        try {
-            List<SetCardFileEntry> entries = new ArrayList<>();
-            String searchPath = "/cards/search?q=" +
-                    URLEncoder.encode("set:" + setCode, StandardCharsets.UTF_8) +
-                    "&unique=prints";
-            String currentPage = searchPath;
-            while (currentPage != null) {
-                String json = scryfallClient.get(currentPage);
-                Map<String, Object> response = gson.fromJson(json, new TypeToken<Map<String, Object>>() {}.getType());
-                @SuppressWarnings("unchecked")
-                List<Map<String, Object>> data = (List<Map<String, Object>>) response.get("data");
-                if (data == null) {
-                    break;
-                }
-                for (Map<String, Object> cardMap : data) {
-                    String collectorNumber = (String) cardMap.get("collector_number");
-                    String cardName = (String) cardMap.get("name");
-                    if (collectorNumber == null || collectorNumber.isBlank() || cardName == null || cardName.isBlank()) {
-                        continue;
-                    }
-                    entries.add(new SetCardFileEntry(
-                            collectorNumber,
-                            cardName,
-                            collectorNumber + "-" + sanitizeObjectKeyPart(cardName)));
-                }
-                Boolean hasMore = (Boolean) response.get("has_more");
-                String nextPage = (String) response.get("next_page");
-                currentPage = Boolean.TRUE.equals(hasMore) ? nextPage : null;
-            }
-            return entries;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Interrupted loading Scryfall filename index for set {}", setCode);
-            return List.of();
-        } catch (Exception e) {
-            log.warn("Failed to load Scryfall filename index for set {}: {}", setCode, e.getMessage());
-            return List.of();
-        }
-    }
-
-    private String sanitizeObjectKeyPart(String input) {
-        if (input == null) {
-            return "unknown";
-        }
-        return input.replaceAll("[/\\\\:*?\"<>|]", "_").trim();
+        return -1;
     }
 
     public void syncImagesFromScryfall(String setCode) {
