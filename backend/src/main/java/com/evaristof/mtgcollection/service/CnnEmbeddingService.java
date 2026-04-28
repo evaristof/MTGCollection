@@ -40,11 +40,12 @@ public class CnnEmbeddingService {
     private static final float[] STD = {0.229f, 0.224f, 0.225f};
 
     private ZooModel<BufferedImage, float[]> model;
+    private Path modelDir;
 
     @PostConstruct
     void init() {
         try {
-            Path modelDir = Files.createTempDirectory("djl-model");
+            modelDir = Files.createTempDirectory("djl-model");
             Path modelFile = modelDir.resolve("efficientnet_b0_features.onnx");
             try (InputStream is = getClass().getResourceAsStream(MODEL_RESOURCE)) {
                 if (is == null) {
@@ -73,6 +74,15 @@ public class CnnEmbeddingService {
     void destroy() {
         if (model != null) {
             model.close();
+        }
+        if (modelDir != null) {
+            try {
+                Files.walk(modelDir)
+                        .sorted(java.util.Comparator.reverseOrder())
+                        .forEach(p -> {
+                            try { Files.deleteIfExists(p); } catch (IOException ignored) {}
+                        });
+            } catch (IOException ignored) {}
         }
     }
 

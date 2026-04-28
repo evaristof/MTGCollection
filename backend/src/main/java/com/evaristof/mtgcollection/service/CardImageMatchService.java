@@ -132,57 +132,65 @@ public class CardImageMatchService {
             }
         }
 
+        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
+        Hash uploadedHash = hasher.hash(uploadedImage);
+        BigInteger uploadedValue = uploadedHash.getHashValue();
+        int actualBitLength = uploadedHash.getBitResolution();
+
         List<CardImageHash> shortlistCards = null;
         if (uploadedEmbedding != null) {
             shortlistCards = buildCnnShortlist(allHashes, uploadedEmbedding);
             log.debug("CNN shortlist: {} candidates", shortlistCards.size());
         }
         if (shortlistCards == null || shortlistCards.isEmpty()) {
-            shortlistCards = buildPHashShortlist(allHashes, uploadedImage);
+            shortlistCards = buildPHashShortlist(allHashes, uploadedValue, actualBitLength);
             log.debug("pHash shortlist: {} candidates", shortlistCards.size());
         }
-
-        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
-        Hash uploadedHash = hasher.hash(uploadedImage);
-        BigInteger uploadedValue = uploadedHash.getHashValue();
-        int actualBitLength = uploadedHash.getBitResolution();
 
         CardImageHash bestCard = null;
         OrbValidationResult bestOrbResult = null;
         double bestConfidence = -1.0;
 
-        for (CardImageHash card : shortlistCards) {
-            try {
-                byte[] referenceBytes = minioStorage.download(card.getMinioPath());
-                BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
-                if (referenceImage == null) {
-                    continue;
-                }
+        Mat sourceArt = null;
+        try {
+            sourceArt = prepareSourceArt(uploadedImage);
+            for (CardImageHash card : shortlistCards) {
+                try {
+                    byte[] referenceBytes = minioStorage.download(card.getMinioPath());
+                    BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
+                    if (referenceImage == null) {
+                        continue;
+                    }
 
-                OrbValidationResult orbResult = computeOrbValidation(uploadedImage, referenceImage);
+                    OrbValidationResult orbResult = computeOrbValidation(sourceArt, referenceImage);
 
-                double confidence;
-                if (uploadedEmbedding != null && card.getCnnEmbedding() != null) {
-                    float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
-                    double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
-                    confidence = combineCnnOrbConfidence(cnnSim, orbResult.score());
-                } else {
-                    double pHashDist = normalizedHammingDistance(
-                            uploadedValue,
-                            new BigInteger(card.getPHash(), 16),
-                            actualBitLength);
-                    confidence = combineConfidence(pHashDist, orbResult.score());
-                }
+                    double confidence;
+                    if (uploadedEmbedding != null && card.getCnnEmbedding() != null) {
+                        float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
+                        double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
+                        confidence = combineCnnOrbConfidence(cnnSim, orbResult.score());
+                    } else {
+                        double pHashDist = normalizedHammingDistance(
+                                uploadedValue,
+                                new BigInteger(card.getPHash(), 16),
+                                actualBitLength);
+                        confidence = combineConfidence(pHashDist, orbResult.score());
+                    }
 
-                if (confidence > bestConfidence) {
-                    bestCard = card;
-                    bestOrbResult = orbResult;
-                    bestConfidence = confidence;
+                    if (confidence > bestConfidence) {
+                        bestCard = card;
+                        bestOrbResult = orbResult;
+                        bestConfidence = confidence;
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to validate candidate {}/{}: {}",
+                            card.getSetCode(), card.getCollectorNumber(), e.getMessage());
                 }
-            } catch (Exception e) {
-                log.warn("Failed to validate candidate {}/{}: {}",
-                        card.getSetCode(), card.getCollectorNumber(), e.getMessage());
             }
+        } catch (IOException e) {
+            log.warn("Failed to prepare source image for ORB: {}", e.getMessage());
+        } finally {
+            if (sourceArt != null) sourceArt.release();
         }
 
         if (bestCard == null || bestOrbResult == null) {
@@ -212,12 +220,8 @@ public class CardImageMatchService {
                 .toList();
     }
 
-    private List<CardImageHash> buildPHashShortlist(List<CardImageHash> allHashes, BufferedImage uploadedImage) {
-        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
-        Hash uploadedHash = hasher.hash(uploadedImage);
-        BigInteger uploadedValue = uploadedHash.getHashValue();
-        int actualBitLength = uploadedHash.getBitResolution();
-
+    private List<CardImageHash> buildPHashShortlist(List<CardImageHash> allHashes,
+                                                    BigInteger uploadedValue, int actualBitLength) {
         List<Candidate> rankedCandidates = allHashes.stream()
                 .map(h -> new Candidate(h,
                         normalizedHammingDistance(uploadedValue, new BigInteger(h.getPHash(), 16), actualBitLength)))
@@ -415,8 +419,17 @@ public class CardImageMatchService {
 
         Map<String, String> imageUris = (Map<String, String>) cardMap.get("image_uris");
         if (imageUris == null || !imageUris.containsKey("png")) {
-            log.debug("No image_uris.png for {}/{}, skipping", setCode, collectorNumber);
-            return;
+            List<Map<String, Object>> cardFaces = (List<Map<String, Object>>) cardMap.get("card_faces");
+            if (cardFaces != null && !cardFaces.isEmpty()) {
+                Map<String, String> faceUris = (Map<String, String>) cardFaces.get(0).get("image_uris");
+                if (faceUris != null && faceUris.containsKey("png")) {
+                    imageUris = faceUris;
+                }
+            }
+            if (imageUris == null || !imageUris.containsKey("png")) {
+                log.debug("No image_uris.png for {}/{}, skipping", setCode, collectorNumber);
+                return;
+            }
         }
 
         String imageUrl = imageUris.get("png");
@@ -495,11 +508,18 @@ public class CardImageMatchService {
         return (normalizedCnn * 0.40) + (orbScore * 0.60);
     }
 
-    private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
+    private Mat prepareSourceArt(BufferedImage sourceImage) throws IOException {
+        Mat sourceFull = toNormalizedGrayMat(sourceImage);
+        try {
+            return extractArtRegion(sourceFull);
+        } finally {
+            sourceFull.release();
+        }
+    }
+
+    private OrbValidationResult computeOrbValidation(Mat sourceArt,
                                                      BufferedImage referenceImage) throws IOException {
-        Mat sourceFull = null;
         Mat referenceFull = null;
-        Mat source = null;
         Mat reference = null;
         MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
         MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
@@ -511,16 +531,12 @@ public class CardImageMatchService {
         BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
 
         try {
-            sourceFull = toNormalizedGrayMat(sourceImage);
             referenceFull = toNormalizedGrayMat(referenceImage);
-            source = extractArtRegion(sourceFull);
             reference = extractArtRegion(referenceFull);
-            sourceFull.release();
-            sourceFull = null;
             referenceFull.release();
             referenceFull = null;
 
-            orb.detectAndCompute(source, noMask, sourceKeypoints, sourceDescriptors);
+            orb.detectAndCompute(sourceArt, noMask, sourceKeypoints, sourceDescriptors);
             orb.detectAndCompute(reference, noMask, referenceKeypoints, referenceDescriptors);
             if (sourceDescriptors.empty() || referenceDescriptors.empty()) {
                 return new OrbValidationResult(0.0, 0, 0);
@@ -580,9 +596,7 @@ public class CardImageMatchService {
             double score = Math.max(inlierScore, matchScore * 0.75);
             return new OrbValidationResult(score, goodMatches.size(), inliers);
         } finally {
-            if (sourceFull != null) sourceFull.release();
             if (referenceFull != null) referenceFull.release();
-            if (source != null) source.release();
             if (reference != null) reference.release();
             sourceKeypoints.release();
             referenceKeypoints.release();
