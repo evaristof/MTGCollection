@@ -307,6 +307,10 @@ public class CardImageMatchService {
                 return i;
             }
         }
+        int firstDash = fileStem.indexOf('-');
+        if (firstDash > 0 && firstDash < fileStem.length() - 1) {
+            return firstDash;
+        }
         return -1;
     }
 
