@@ -19,6 +19,7 @@ import org.opencv.core.MatOfByte;
 import org.opencv.core.MatOfDMatch;
 import org.opencv.core.MatOfKeyPoint;
 import org.opencv.core.MatOfPoint2f;
+import org.opencv.core.Rect;
 import org.opencv.core.Size;
 import org.opencv.features2d.BFMatcher;
 import org.opencv.features2d.ORB;
@@ -469,14 +470,18 @@ public class CardImageMatchService {
 
     private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
                                                      BufferedImage referenceImage) throws IOException {
-        Mat source = toNormalizedGrayMat(sourceImage);
-        Mat reference;
+        Mat sourceFull = toNormalizedGrayMat(sourceImage);
+        Mat referenceFull;
         try {
-            reference = toNormalizedGrayMat(referenceImage);
+            referenceFull = toNormalizedGrayMat(referenceImage);
         } catch (IOException | RuntimeException e) {
-            source.release();
+            sourceFull.release();
             throw e;
         }
+        Mat source = extractArtRegion(sourceFull);
+        Mat reference = extractArtRegion(referenceFull);
+        sourceFull.release();
+        referenceFull.release();
         MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
         MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
         Mat sourceDescriptors = new Mat();
@@ -558,6 +563,17 @@ public class CardImageMatchService {
             matcher.clear();
             orb.clear();
         }
+    }
+
+    private Mat extractArtRegion(Mat gray) {
+        int h = gray.rows();
+        int w = gray.cols();
+        int artTop = (int) (h * 0.08);
+        int artBottom = (int) (h * 0.55);
+        int artLeft = (int) (w * 0.05);
+        int artRight = (int) (w * 0.95);
+        Rect artRect = new Rect(artLeft, artTop, artRight - artLeft, artBottom - artTop);
+        return gray.submat(artRect).clone();
     }
 
     private Mat toNormalizedGrayMat(BufferedImage image) throws IOException {
