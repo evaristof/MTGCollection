@@ -31,6 +31,9 @@ public class CardImageHash {
     @Column(name = "MINIO_PATH", nullable = false)
     private String minioPath;
 
+    @Column(name = "CNN_EMBEDDING", columnDefinition = "TEXT")
+    private String cnnEmbedding;
+
     public Long getId() {
         return id;
     }
@@ -77,5 +80,13 @@ public class CardImageHash {
 
     public void setMinioPath(String minioPath) {
         this.minioPath = minioPath;
+    }
+
+    public String getCnnEmbedding() {
+        return cnnEmbedding;
+    }
+
+    public void setCnnEmbedding(String cnnEmbedding) {
+        this.cnnEmbedding = cnnEmbedding;
     }
 }

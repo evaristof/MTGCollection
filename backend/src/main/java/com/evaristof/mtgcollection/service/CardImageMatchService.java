@@ -75,6 +75,7 @@ public class CardImageMatchService {
     private final MagicSetRepository setRepository;
     private final MinioStorageService minioStorage;
     private final ScryfallHttpClient scryfallClient;
+    private final CnnEmbeddingService cnnEmbeddingService;
     private final Gson gson;
     private final HttpClient imageHttpClient;
     private final ConcurrentMap<String, List<SetCardFileEntry>> setCardFileIndexCache = new ConcurrentHashMap<>();
@@ -82,6 +83,8 @@ public class CardImageMatchService {
     private final AtomicBoolean populateRunning = new AtomicBoolean(false);
 
     public record MatchResult(CardImageHash card, double confidence) {}
+
+    private record CnnCandidate(CardImageHash card, double cnnSimilarity) {}
 
     private record Candidate(CardImageHash card, double pHashDistance) {}
 
@@ -91,11 +94,13 @@ public class CardImageMatchService {
                                  MagicSetRepository setRepository,
                                  MinioStorageService minioStorage,
                                  ScryfallHttpClient scryfallClient,
+                                 CnnEmbeddingService cnnEmbeddingService,
                                  Gson gson) {
         this.hashRepository = hashRepository;
         this.setRepository = setRepository;
         this.minioStorage = minioStorage;
         this.scryfallClient = scryfallClient;
+        this.cnnEmbeddingService = cnnEmbeddingService;
         this.gson = gson;
         this.imageHttpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -115,71 +120,117 @@ public class CardImageMatchService {
     }
 
     public MatchResult findBestMatch(BufferedImage uploadedImage) {
-        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
-        Hash uploadedHash = hasher.hash(uploadedImage);
-        BigInteger uploadedValue = uploadedHash.getHashValue();
-        int actualBitLength = uploadedHash.getBitResolution();
-
         List<CardImageHash> allHashes = hashRepository.findAll();
         if (allHashes.isEmpty()) {
             return null;
         }
 
-        List<Candidate> rankedCandidates = allHashes.stream()
-                .map(candidate -> new Candidate(
-                        candidate,
-                        normalizedHammingDistance(uploadedValue, new BigInteger(candidate.getPHash(), 16), actualBitLength)))
-                .sorted(Comparator.comparingDouble(Candidate::pHashDistance))
-                .toList();
-
-        List<Candidate> shortlist = rankedCandidates.stream()
-                .filter(candidate -> candidate.pHashDistance() <= PHASH_SHORTLIST_DISTANCE)
-                .limit(PHASH_SHORTLIST_SIZE)
-                .toList();
-        if (shortlist.isEmpty()) {
-            shortlist = rankedCandidates.stream().limit(PHASH_SHORTLIST_SIZE).toList();
+        boolean cnnAvailable = cnnEmbeddingService.isAvailable();
+        float[] uploadedEmbedding = null;
+        if (cnnAvailable) {
+            try {
+                uploadedEmbedding = cnnEmbeddingService.extractArtEmbedding(uploadedImage);
+            } catch (Exception e) {
+                log.warn("CNN embedding extraction failed, falling back to pHash: {}", e.getMessage());
+            }
         }
 
-        Candidate bestCandidate = null;
+        List<CardImageHash> shortlistCards;
+        if (uploadedEmbedding != null) {
+            shortlistCards = buildCnnShortlist(allHashes, uploadedEmbedding);
+            log.debug("CNN shortlist: {} candidates", shortlistCards.size());
+        } else {
+            shortlistCards = buildPHashShortlist(allHashes, uploadedImage);
+            log.debug("pHash shortlist: {} candidates", shortlistCards.size());
+        }
+
+        CardImageHash bestCard = null;
         OrbValidationResult bestOrbResult = null;
         double bestConfidence = -1.0;
 
-        for (Candidate candidate : shortlist) {
+        for (CardImageHash card : shortlistCards) {
             try {
-                byte[] referenceBytes = minioStorage.download(candidate.card().getMinioPath());
+                byte[] referenceBytes = minioStorage.download(card.getMinioPath());
                 BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
                 if (referenceImage == null) {
                     continue;
                 }
 
                 OrbValidationResult orbResult = computeOrbValidation(uploadedImage, referenceImage);
-                double confidence = combineConfidence(candidate.pHashDistance(), orbResult.score());
+
+                double confidence;
+                if (uploadedEmbedding != null && card.getCnnEmbedding() != null) {
+                    float[] refEmbedding = CnnEmbeddingService.base64ToEmbedding(card.getCnnEmbedding());
+                    double cnnSim = CnnEmbeddingService.cosineSimilarity(uploadedEmbedding, refEmbedding);
+                    confidence = combineCnnOrbConfidence(cnnSim, orbResult.score());
+                } else {
+                    PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
+                    Hash uploadedHash = hasher.hash(uploadedImage);
+                    double pHashDist = normalizedHammingDistance(
+                            uploadedHash.getHashValue(),
+                            new BigInteger(card.getPHash(), 16),
+                            uploadedHash.getBitResolution());
+                    confidence = combineConfidence(pHashDist, orbResult.score());
+                }
+
                 if (confidence > bestConfidence) {
-                    bestCandidate = candidate;
+                    bestCard = card;
                     bestOrbResult = orbResult;
                     bestConfidence = confidence;
                 }
             } catch (Exception e) {
                 log.warn("Failed to validate candidate {}/{}: {}",
-                        candidate.card().getSetCode(),
-                        candidate.card().getCollectorNumber(),
-                        e.getMessage());
+                        card.getSetCode(), card.getCollectorNumber(), e.getMessage());
             }
         }
 
-        if (bestCandidate == null || bestOrbResult == null) {
+        if (bestCard == null || bestOrbResult == null) {
             return null;
         }
 
         boolean orbAccepted = bestOrbResult.inliers() >= MIN_ORB_INLIERS
                 || bestOrbResult.goodMatches() >= MIN_ORB_GOOD_MATCHES;
-        boolean directPHashAccepted = bestCandidate.pHashDistance() <= PHASH_DIRECT_MATCH_DISTANCE;
-        if (!orbAccepted && !directPHashAccepted && bestConfidence < MIN_HYBRID_CONFIDENCE) {
+        if (!orbAccepted && bestConfidence < MIN_HYBRID_CONFIDENCE) {
             return null;
         }
 
         double roundedConfidence = Math.round(bestConfidence * 100.0) / 100.0;
-        return new MatchResult(bestCandidate.card(), roundedConfidence);
+        return new MatchResult(bestCard, roundedConfidence);
+    }
+
+    private List<CardImageHash> buildCnnShortlist(List<CardImageHash> allHashes, float[] uploadedEmbedding) {
+        return allHashes.stream()
+                .filter(h -> h.getCnnEmbedding() != null)
+                .map(h -> new CnnCandidate(h,
+                        CnnEmbeddingService.cosineSimilarity(
+                                uploadedEmbedding,
+                                CnnEmbeddingService.base64ToEmbedding(h.getCnnEmbedding()))))
+                .sorted(Comparator.comparingDouble(CnnCandidate::cnnSimilarity).reversed())
+                .limit(PHASH_SHORTLIST_SIZE)
+                .map(CnnCandidate::card)
+                .toList();
+    }
+
+    private List<CardImageHash> buildPHashShortlist(List<CardImageHash> allHashes, BufferedImage uploadedImage) {
+        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
+        Hash uploadedHash = hasher.hash(uploadedImage);
+        BigInteger uploadedValue = uploadedHash.getHashValue();
+        int actualBitLength = uploadedHash.getBitResolution();
+
+        List<Candidate> rankedCandidates = allHashes.stream()
+                .map(h -> new Candidate(h,
+                        normalizedHammingDistance(uploadedValue, new BigInteger(h.getPHash(), 16), actualBitLength)))
+                .sorted(Comparator.comparingDouble(Candidate::pHashDistance))
+                .toList();
+
+        List<Candidate> shortlist = rankedCandidates.stream()
+                .filter(c -> c.pHashDistance() <= PHASH_SHORTLIST_DISTANCE)
+                .limit(PHASH_SHORTLIST_SIZE)
+                .toList();
+        if (shortlist.isEmpty()) {
+            shortlist = rankedCandidates.stream().limit(PHASH_SHORTLIST_SIZE).toList();
+        }
+        return shortlist.stream().map(Candidate::card).toList();
     }
 
     public Optional<CardImageHash> findHashBySetAndNumber(String setCode, String collectorNumber) {
@@ -244,6 +295,7 @@ public class CardImageMatchService {
                 entity.setCardName(parsed.cardName);
                 entity.setPHash(hash);
                 entity.setMinioPath(objectKey);
+                computeAndSetEmbedding(entity, image);
                 hashRepository.save(entity);
                 count++;
 
@@ -436,6 +488,7 @@ public class CardImageMatchService {
         entity.setCardName(name != null ? name : "Unknown");
         entity.setPHash(hash);
         entity.setMinioPath(objectKey);
+        computeAndSetEmbedding(entity, image);
         hashRepository.save(entity);
 
         log.info("Synced image hash for {}/{} ({})", setCode, collectorNumber, name);
@@ -461,6 +514,19 @@ public class CardImageMatchService {
         return response.body();
     }
 
+    private void computeAndSetEmbedding(CardImageHash entity, BufferedImage image) {
+        if (!cnnEmbeddingService.isAvailable()) {
+            return;
+        }
+        try {
+            float[] embedding = cnnEmbeddingService.extractArtEmbedding(image);
+            entity.setCnnEmbedding(CnnEmbeddingService.embeddingToBase64(embedding));
+        } catch (Exception e) {
+            log.warn("Failed to compute CNN embedding for {}/{}: {}",
+                    entity.getSetCode(), entity.getCollectorNumber(), e.getMessage());
+        }
+    }
+
     private double normalizedHammingDistance(BigInteger a, BigInteger b, int bitLength) {
         BigInteger xor = a.xor(b);
         int diffBits = xor.bitCount();
@@ -470,6 +536,11 @@ public class CardImageMatchService {
     private double combineConfidence(double pHashDistance, double orbScore) {
         double pHashScore = 1.0 - Math.min(1.0, pHashDistance);
         return (pHashScore * 0.35) + (orbScore * 0.65);
+    }
+
+    private double combineCnnOrbConfidence(double cnnSimilarity, double orbScore) {
+        double normalizedCnn = Math.max(0.0, Math.min(1.0, cnnSimilarity));
+        return (normalizedCnn * 0.40) + (orbScore * 0.60);
     }
 
     private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
