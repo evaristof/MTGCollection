@@ -10,32 +10,17 @@ import com.google.gson.reflect.TypeToken;
 import dev.brachtendorf.jimagehash.hash.Hash;
 import dev.brachtendorf.jimagehash.hashAlgorithms.PerceptiveHash;
 import jakarta.annotation.PreDestroy;
-import nu.pattern.OpenCV;
-import org.opencv.calib3d.Calib3d;
-import org.opencv.core.Core;
-import org.opencv.core.DMatch;
-import org.opencv.core.Mat;
-import org.opencv.core.MatOfByte;
-import org.opencv.core.MatOfDMatch;
-import org.opencv.core.MatOfKeyPoint;
-import org.opencv.core.MatOfPoint2f;
-import org.opencv.core.Rect;
-import org.opencv.core.Size;
-import org.opencv.features2d.BFMatcher;
-import org.opencv.features2d.ORB;
-import org.opencv.imgcodecs.Imgcodecs;
-import org.opencv.imgproc.Imgproc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.math.BigInteger;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -43,37 +28,66 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class CardImageMatchService {
 
-    static {
-        OpenCV.loadLocally();
-    }
+    // OpenCV native library is loaded once, by CardPerspectiveService's own
+    // static initializer — loading it a second time from here corrupted
+    // native memory (same class of bug as the DJL/ONNX conflict described
+    // in CnnEmbeddingService). CardPerspectiveService is a required
+    // constructor dependency below, so its class (and static initializer)
+    // is guaranteed to load before this class is used.
 
     private static final Logger log = LoggerFactory.getLogger(CardImageMatchService.class);
     private static final int HASH_BIT_RESOLUTION = 64;
-    private static final int PHASH_SHORTLIST_SIZE = 25;
-    private static final double PHASH_SHORTLIST_DISTANCE = 0.50;
-    private static final double PHASH_DIRECT_MATCH_DISTANCE = 0.10;
-    private static final int ORB_FEATURES = 1500;
-    private static final float ORB_RATIO_TEST = 0.75f;
-    private static final int MIN_ORB_GOOD_MATCHES = 10;
-    private static final int MIN_ORB_INLIERS = 8;
-    private static final double MIN_HYBRID_CONFIDENCE = 0.35;
-    private static final int ORB_TARGET_HEIGHT = 700;
+    // Minimum RANSAC homography inliers for an ORB art match to be trusted.
+    // Correct matches on real photos land >=20 inliers; wrong cards stay in
+    // the low single digits, so this cleanly separates them with margin.
+    private static final int ORB_ACCEPT_INLIERS = 12;
+
+    // Title/footer OCR crop regions (as a fraction of the perspective-corrected
+    // card image), calibrated against the standard modern Magic frame
+    // (~2015+). Cards with special/vintage borders won't line up here — OCR
+    // simply returns no usable text for them and the pipeline falls back to
+    // pHash/ORB, so keeping fixed percentages is safe even though they aren't
+    // universal across every frame era.
+    private static final double TITLE_TOP = 0.052;
+    private static final double TITLE_BOTTOM = 0.097;
+    private static final double TITLE_LEFT = 0.055;
+    private static final double TITLE_RIGHT = 0.85;
+    private static final double FOOTER_TOP = 0.936;
+    private static final double FOOTER_BOTTOM = 0.978;
+    private static final double FOOTER_LEFT = 0.015;
+    private static final double FOOTER_RIGHT = 0.24;
+    private static final int OCR_CROP_UPSCALE = 3;
+    // Empirically, fuzzy-matching pure OCR noise against the ~35k-name
+    // Scryfall catalog still lands a "match" around score 86 by pure
+    // coincidence — only trust scores at or above this as a real signal.
+    private static final int NAME_MATCH_STRONG_THRESHOLD = 90;
+
+    private static final Pattern COLLECTOR_NUMBER_PATTERN = Pattern.compile("(\\d{1,4})(?:/\\d{1,4})?");
+    private static final Pattern SET_CODE_PATTERN = Pattern.compile("\\b([A-Z]{2,5})\\b");
+    private static final Set<String> FOOTER_SET_CODE_STOPWORDS = Set.of("EN", "R", "U", "C", "M");
 
     private final CardImageHashRepository hashRepository;
     private final MagicSetRepository setRepository;
     private final MinioStorageService minioStorage;
     private final ScryfallHttpClient scryfallClient;
     private final CnnEmbeddingService cnnEmbeddingService;
+    private final CardPerspectiveService perspectiveService;
+    private final TesseractOcrService ocrService;
+    private final CardNameCatalogService nameCatalogService;
+    private final OrbArtMatchService orbArtMatchService;
     private final Gson gson;
     private final HttpClient imageHttpClient;
     private final AtomicBoolean syncRunning = new AtomicBoolean(false);
@@ -81,21 +95,31 @@ public class CardImageMatchService {
 
     public record MatchResult(CardImageHash card, double confidence) {}
 
-    private record Candidate(CardImageHash card, double pHashDistance) {}
+    private record FooterInfo(String collectorNumber, String setCode) {}
 
-    private record OrbValidationResult(double score, int goodMatches, int inliers) {}
+    private record OcrPass(CardNameCatalogService.NameMatch nameMatch, FooterInfo footer) {}
+
+    private record TextSignal(BufferedImage image, CardNameCatalogService.NameMatch nameMatch, FooterInfo footer) {}
 
     public CardImageMatchService(CardImageHashRepository hashRepository,
                                  MagicSetRepository setRepository,
                                  MinioStorageService minioStorage,
                                  ScryfallHttpClient scryfallClient,
                                  CnnEmbeddingService cnnEmbeddingService,
+                                 CardPerspectiveService perspectiveService,
+                                 TesseractOcrService ocrService,
+                                 CardNameCatalogService nameCatalogService,
+                                 OrbArtMatchService orbArtMatchService,
                                  Gson gson) {
         this.hashRepository = hashRepository;
         this.setRepository = setRepository;
         this.minioStorage = minioStorage;
         this.scryfallClient = scryfallClient;
         this.cnnEmbeddingService = cnnEmbeddingService;
+        this.perspectiveService = perspectiveService;
+        this.ocrService = ocrService;
+        this.nameCatalogService = nameCatalogService;
+        this.orbArtMatchService = orbArtMatchService;
         this.gson = gson;
         this.imageHttpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -120,75 +144,250 @@ public class CardImageMatchService {
             return null;
         }
 
-        PerceptiveHash hasher = new PerceptiveHash(HASH_BIT_RESOLUTION);
-        Hash uploadedHash = hasher.hash(uploadedImage);
-        BigInteger uploadedValue = uploadedHash.getHashValue();
-        int actualBitLength = uploadedHash.getBitResolution();
+        // 1. Correct perspective — downstream art/OCR crops assume a flat,
+        // border-cropped card. Fails open (returns the original) if no card
+        // contour is found.
+        BufferedImage corrected = perspectiveService.correctPerspective(uploadedImage);
 
-        List<CardImageHash> shortlistCards = buildPHashShortlist(allHashes, uploadedValue, actualBitLength);
-        log.debug("pHash shortlist: {} candidates", shortlistCards.size());
+        // 2. OCR the title/footer bands (strong, deterministic signal when the
+        // frame/language line up), trying both orientations.
+        TextSignal textSignal = extractTextSignal(corrected);
+        BufferedImage workingImage = textSignal.image();
 
-        CardImageHash bestCard = null;
-        OrbValidationResult bestOrbResult = null;
-        double bestConfidence = -1.0;
-
-        for (CardImageHash card : shortlistCards) {
-            try {
-                byte[] referenceBytes = minioStorage.download(card.getMinioPath());
-                BufferedImage referenceImage = ImageIO.read(new ByteArrayInputStream(referenceBytes));
-                if (referenceImage == null) {
-                    continue;
-                }
-
-                OrbValidationResult orbResult = computeOrbValidation(uploadedImage, referenceImage);
-
-                double pHashDist = normalizedHammingDistance(
-                        uploadedValue,
-                        new BigInteger(card.getPHash(), 16),
-                        actualBitLength);
-                double confidence = combineConfidence(pHashDist, orbResult.score());
-
-                if (confidence > bestConfidence) {
-                    bestCard = card;
-                    bestOrbResult = orbResult;
-                    bestConfidence = confidence;
-                }
-            } catch (Exception e) {
-                log.warn("Failed to validate candidate {}/{}: {}",
-                        card.getSetCode(), card.getCollectorNumber(), e.getMessage());
-            }
+        CardNameCatalogService.NameMatch nameMatch = textSignal.nameMatch();
+        CardImageHash nameCard = null;
+        if (nameMatch != null && nameMatch.score() >= NAME_MATCH_STRONG_THRESHOLD) {
+            nameCard = allHashes.stream()
+                    .filter(h -> h.getCardName().equalsIgnoreCase(nameMatch.name()))
+                    .findFirst().orElse(null);
         }
 
-        if (bestCard == null || bestOrbResult == null) {
+        // 3. ORB art match against ALL cached references — the primary,
+        // language- and frame-independent signal. Ranked by homography
+        // inliers (geometric verification), highest first.
+        List<OrbArtMatchService.ScoredCard> ranked = orbArtMatchService.match(workingImage);
+        OrbArtMatchService.ScoredCard bestOrb = ranked.isEmpty() ? null : ranked.get(0);
+        boolean orbStrong = bestOrb != null && bestOrb.inliers() >= ORB_ACCEPT_INLIERS;
+
+        CardImageHash chosen;
+        double confidence;
+        String reason;
+
+        boolean nameOnOrbTop = nameCard != null && bestOrb != null
+                && nameCard.getId().equals(bestOrb.card().getId());
+        boolean footerOnName = nameCard != null && footerMatches(textSignal.footer(), nameCard);
+
+        if (orbStrong) {
+            // Geometric art match — trust it. Corroborating OCR name/footer
+            // pushes confidence toward certainty.
+            chosen = bestOrb.card();
+            confidence = 0.60 + Math.min(0.30, bestOrb.inliers() / 60.0);
+            if (nameOnOrbTop) confidence += 0.08;
+            if (footerOnName) confidence += 0.05;
+            reason = "orb(inliers=" + bestOrb.inliers() + ",good=" + bestOrb.goodMatches() + ")";
+        } else if (nameCard != null && footerOnName) {
+            // No strong art match, but the printed name AND collector number/
+            // set were read and agree — reliable for legible modern frames.
+            chosen = nameCard;
+            confidence = 0.88;
+            reason = "name+footer";
+        } else if (nameCard != null && nameOnOrbTop) {
+            chosen = nameCard;
+            confidence = 0.70;
+            reason = "name+orbtop";
+        } else {
+            chosen = null;
+            confidence = 0.0;
+            reason = "none";
+        }
+
+        int bestInliers = bestOrb != null ? bestOrb.inliers() : 0;
+        int bestGood = bestOrb != null ? bestOrb.goodMatches() : 0;
+        log.info("Scan: chosen={} reason={} conf={} | orbTop={} inliers={} good={} | ocrName={}",
+                chosen == null ? "none" : chosen.getSetCode() + "/" + chosen.getCollectorNumber()
+                        + " (" + chosen.getCardName() + ")",
+                reason, String.format("%.2f", confidence),
+                bestOrb == null ? "-" : bestOrb.card().getSetCode() + "/" + bestOrb.card().getCollectorNumber(),
+                bestInliers, bestGood, nameMatch);
+
+        if (chosen == null) {
             return null;
         }
-
-        boolean orbAccepted = bestOrbResult.inliers() >= MIN_ORB_INLIERS
-                || bestOrbResult.goodMatches() >= MIN_ORB_GOOD_MATCHES;
-        if (!orbAccepted && bestConfidence < MIN_HYBRID_CONFIDENCE) {
-            return null;
-        }
-
-        double roundedConfidence = Math.round(bestConfidence * 100.0) / 100.0;
-        return new MatchResult(bestCard, roundedConfidence);
+        double roundedConfidence = Math.round(Math.min(1.0, confidence) * 100.0) / 100.0;
+        return new MatchResult(chosen, roundedConfidence);
     }
 
-    private List<CardImageHash> buildPHashShortlist(List<CardImageHash> allHashes,
-                                                    BigInteger uploadedValue, int actualBitLength) {
-        List<Candidate> rankedCandidates = allHashes.stream()
-                .map(h -> new Candidate(h,
-                        normalizedHammingDistance(uploadedValue, new BigInteger(h.getPHash(), 16), actualBitLength)))
-                .sorted(Comparator.comparingDouble(Candidate::pHashDistance))
-                .toList();
+    /**
+     * Diagnostic probe (not part of normal matching): given a photo and the
+     * KNOWN-correct set/number, reports where the expected card lands in the
+     * ORB art-match ranking (its rank, inliers, good matches) plus the OCR
+     * read — to pinpoint why a real photo does or doesn't match.
+     */
+    public Map<String, Object> diagnose(BufferedImage uploadedImage, String expectedSet, String expectedNumber) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        List<CardImageHash> allHashes = hashRepository.findAll();
+        out.put("db_size", allHashes.size());
 
-        List<Candidate> shortlist = rankedCandidates.stream()
-                .filter(c -> c.pHashDistance() <= PHASH_SHORTLIST_DISTANCE)
-                .limit(PHASH_SHORTLIST_SIZE)
-                .toList();
-        if (shortlist.isEmpty()) {
-            shortlist = rankedCandidates.stream().limit(PHASH_SHORTLIST_SIZE).toList();
+        BufferedImage corrected = perspectiveService.correctPerspective(uploadedImage);
+        boolean perspectiveApplied = corrected.getWidth() != uploadedImage.getWidth()
+                || corrected.getHeight() != uploadedImage.getHeight();
+        out.put("perspective_applied", perspectiveApplied);
+
+        TextSignal textSignal = extractTextSignal(corrected);
+        out.put("ocr_name_match", String.valueOf(textSignal.nameMatch()));
+        out.put("ocr_footer", String.valueOf(textSignal.footer()));
+
+        List<OrbArtMatchService.ScoredCard> ranked = orbArtMatchService.match(textSignal.image());
+        if (!ranked.isEmpty()) {
+            OrbArtMatchService.ScoredCard top = ranked.get(0);
+            out.put("orb_top", top.card().getSetCode() + "/" + top.card().getCollectorNumber()
+                    + " (" + top.card().getCardName() + ") inliers=" + top.inliers()
+                    + " good=" + top.goodMatches());
         }
-        return shortlist.stream().map(Candidate::card).toList();
+
+        CardImageHash expected = allHashes.stream()
+                .filter(h -> h.getSetCode().equalsIgnoreCase(expectedSet)
+                        && h.getCollectorNumber().equalsIgnoreCase(expectedNumber))
+                .findFirst().orElse(null);
+        if (expected == null) {
+            out.put("expected_in_db", false);
+            return out;
+        }
+        out.put("expected_in_db", true);
+        out.put("expected_name", expected.getCardName());
+
+        int rank = -1;
+        for (int i = 0; i < ranked.size(); i++) {
+            if (ranked.get(i).card().getId().equals(expected.getId())) {
+                rank = i;
+                out.put("expected_orb_rank", i);
+                out.put("expected_orb_inliers", ranked.get(i).inliers());
+                out.put("expected_orb_good", ranked.get(i).goodMatches());
+                break;
+            }
+        }
+        if (rank < 0) {
+            out.put("expected_orb_rank", "not scored (no descriptors cached / no matches)");
+        }
+
+        MatchResult result = findBestMatch(uploadedImage);
+        out.put("actual_match", result == null ? "none"
+                : result.card().getSetCode() + "/" + result.card().getCollectorNumber()
+                        + " (" + result.card().getCardName() + ") conf=" + result.confidence());
+        return out;
+    }
+
+    private TextSignal extractTextSignal(BufferedImage corrected) {
+        if (!ocrService.isAvailable()) {
+            return new TextSignal(corrected, null, null);
+        }
+
+        OcrPass normalPass = runOcrPass(corrected);
+        int normalScore = normalPass.nameMatch() != null ? normalPass.nameMatch().score() : 0;
+        if (normalScore >= NAME_MATCH_STRONG_THRESHOLD) {
+            return new TextSignal(corrected, normalPass.nameMatch(), normalPass.footer());
+        }
+
+        // Geometry alone can't tell "right side up" from "upside down" (a
+        // card rotated 90 degrees in the source photo warps to a portrait
+        // rectangle either way) — try the title OCR on the 180-flipped image
+        // too and use whichever orientation actually reads a real name.
+        BufferedImage flipped = rotate180(corrected);
+        OcrPass flippedPass = runOcrPass(flipped);
+        int flippedScore = flippedPass.nameMatch() != null ? flippedPass.nameMatch().score() : 0;
+        if (flippedScore > normalScore && flippedScore >= NAME_MATCH_STRONG_THRESHOLD) {
+            return new TextSignal(flipped, flippedPass.nameMatch(), flippedPass.footer());
+        }
+
+        // Neither orientation produced a confident OCR read — keep the
+        // perspective-corrected image as-is and let pHash/ORB (which
+        // tolerate rotation reasonably well) carry the match.
+        return new TextSignal(corrected, null, null);
+    }
+
+    private OcrPass runOcrPass(BufferedImage image) {
+        BufferedImage titleCrop = upscaleCrop(image, TITLE_TOP, TITLE_BOTTOM, TITLE_LEFT, TITLE_RIGHT);
+        String titleText = ocrService.recognize(titleCrop, "7").orElse("");
+        List<CardNameCatalogService.NameMatch> matches = nameCatalogService.fuzzyMatch(titleText, 1);
+        CardNameCatalogService.NameMatch best = matches.isEmpty() ? null : matches.get(0);
+
+        BufferedImage footerCrop = upscaleCrop(image, FOOTER_TOP, FOOTER_BOTTOM, FOOTER_LEFT, FOOTER_RIGHT);
+        String footerText = ocrService.recognize(footerCrop, "6").orElse("");
+        FooterInfo footer = parseFooter(footerText);
+
+        log.debug("OCR pass: title='{}' -> {}; footer='{}' -> {}",
+                titleText, best, footerText.replace("\n", " | "), footer);
+        return new OcrPass(best, footer);
+    }
+
+    private FooterInfo parseFooter(String footerText) {
+        if (footerText == null || footerText.isBlank()) {
+            return null;
+        }
+        String number = null;
+        Matcher numberMatcher = COLLECTOR_NUMBER_PATTERN.matcher(footerText);
+        if (numberMatcher.find()) {
+            number = numberMatcher.group(1);
+        }
+        String setCode = null;
+        Matcher setMatcher = SET_CODE_PATTERN.matcher(footerText.toUpperCase(Locale.ROOT));
+        while (setMatcher.find()) {
+            String candidate = setMatcher.group(1);
+            if (!FOOTER_SET_CODE_STOPWORDS.contains(candidate)) {
+                setCode = candidate;
+                break;
+            }
+        }
+        if (number == null || setCode == null) {
+            return null;
+        }
+        return new FooterInfo(number, setCode);
+    }
+
+    private boolean footerMatches(FooterInfo footer, CardImageHash card) {
+        if (footer == null) {
+            return false;
+        }
+        return stripLeadingZeros(footer.collectorNumber()).equals(stripLeadingZeros(card.getCollectorNumber()))
+                && footer.setCode().equalsIgnoreCase(card.getSetCode());
+    }
+
+    private String stripLeadingZeros(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replaceFirst("^0+(?=\\d)", "").toLowerCase(Locale.ROOT);
+    }
+
+    private BufferedImage upscaleCrop(BufferedImage image, double top, double bottom, double left, double right) {
+        int w = image.getWidth();
+        int h = image.getHeight();
+        int x0 = Math.max(0, (int) (w * left));
+        int x1 = Math.min(w, (int) (w * right));
+        int y0 = Math.max(0, (int) (h * top));
+        int y1 = Math.min(h, (int) (h * bottom));
+        BufferedImage sub = image.getSubimage(x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0));
+
+        int newW = sub.getWidth() * OCR_CROP_UPSCALE;
+        int newH = sub.getHeight() * OCR_CROP_UPSCALE;
+        BufferedImage scaled = new BufferedImage(newW, newH, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = scaled.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.drawImage(sub, 0, 0, newW, newH, null);
+        g.dispose();
+        return scaled;
+    }
+
+    private BufferedImage rotate180(BufferedImage source) {
+        int w = source.getWidth();
+        int h = source.getHeight();
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+        g.rotate(Math.PI, w / 2.0, h / 2.0);
+        g.drawImage(source, 0, 0, null);
+        g.dispose();
+        return out;
     }
 
     public Optional<CardImageHash> findHashBySetAndNumber(String setCode, String collectorNumber) {
@@ -264,6 +463,11 @@ public class CardImageMatchService {
         }
 
         log.info("Populated {} hashes from MinIO bucket", count);
+        if (count > 0) {
+            // New reference cards were added — drop the ORB descriptor cache so
+            // it's rebuilt (including the new cards) on the next scan.
+            orbArtMatchService.invalidate();
+        }
         return count;
     }
 
@@ -441,165 +645,4 @@ public class CardImageMatchService {
         // CNN embeddings can be populated by an external Python/CLI tool if needed.
     }
 
-    private double normalizedHammingDistance(BigInteger a, BigInteger b, int bitLength) {
-        BigInteger xor = a.xor(b);
-        int diffBits = xor.bitCount();
-        return (double) diffBits / bitLength;
-    }
-
-    private double combineConfidence(double pHashDistance, double orbScore) {
-        double pHashScore = 1.0 - Math.min(1.0, pHashDistance);
-        return (pHashScore * 0.35) + (orbScore * 0.65);
-    }
-
-
-
-    private OrbValidationResult computeOrbValidation(BufferedImage sourceImage,
-                                                     BufferedImage referenceImage) throws IOException {
-        Mat sourceFull = null;
-        Mat referenceFull = null;
-        Mat source = null;
-        Mat reference = null;
-        MatOfKeyPoint sourceKeypoints = new MatOfKeyPoint();
-        MatOfKeyPoint referenceKeypoints = new MatOfKeyPoint();
-        Mat sourceDescriptors = new Mat();
-        Mat referenceDescriptors = new Mat();
-        Mat inlierMask = new Mat();
-        Mat noMask = new Mat();
-        ORB orb = ORB.create(ORB_FEATURES);
-        BFMatcher matcher = BFMatcher.create(Core.NORM_HAMMING, false);
-
-        try {
-            sourceFull = toNormalizedGrayMat(sourceImage);
-            referenceFull = toNormalizedGrayMat(referenceImage);
-            source = extractArtRegion(sourceFull);
-            reference = extractArtRegion(referenceFull);
-            sourceFull.release();
-            sourceFull = null;
-            referenceFull.release();
-            referenceFull = null;
-
-            orb.detectAndCompute(source, noMask, sourceKeypoints, sourceDescriptors);
-            orb.detectAndCompute(reference, noMask, referenceKeypoints, referenceDescriptors);
-            if (sourceDescriptors.empty() || referenceDescriptors.empty()) {
-                return new OrbValidationResult(0.0, 0, 0);
-            }
-
-            List<MatOfDMatch> knnMatches = new ArrayList<>();
-            matcher.knnMatch(sourceDescriptors, referenceDescriptors, knnMatches, 2);
-            List<DMatch> goodMatches = new ArrayList<>();
-            for (MatOfDMatch matchGroup : knnMatches) {
-                try {
-                    DMatch[] matches = matchGroup.toArray();
-                    if (matches.length < 2) {
-                        continue;
-                    }
-                    if (matches[0].distance < ORB_RATIO_TEST * matches[1].distance) {
-                        goodMatches.add(matches[0]);
-                    }
-                } finally {
-                    matchGroup.release();
-                }
-            }
-
-            if (goodMatches.isEmpty()) {
-                return new OrbValidationResult(0.0, 0, 0);
-            }
-
-            int inliers = 0;
-            if (goodMatches.size() >= 4) {
-                List<org.opencv.core.Point> sourcePoints = new ArrayList<>();
-                List<org.opencv.core.Point> referencePoints = new ArrayList<>();
-                org.opencv.core.KeyPoint[] sourceKeyPointArray = sourceKeypoints.toArray();
-                org.opencv.core.KeyPoint[] referenceKeyPointArray = referenceKeypoints.toArray();
-                for (DMatch match : goodMatches) {
-                    sourcePoints.add(sourceKeyPointArray[match.queryIdx].pt);
-                    referencePoints.add(referenceKeyPointArray[match.trainIdx].pt);
-                }
-                MatOfPoint2f sourceMat = new MatOfPoint2f();
-                sourceMat.fromList(sourcePoints);
-                MatOfPoint2f referenceMat = new MatOfPoint2f();
-                referenceMat.fromList(referencePoints);
-                try {
-                    Calib3d.findHomography(sourceMat, referenceMat, Calib3d.RANSAC, 5.0, inlierMask);
-                    for (int i = 0; i < inlierMask.rows(); i++) {
-                        double[] value = inlierMask.get(i, 0);
-                        if (value != null && value.length > 0 && value[0] != 0.0) {
-                            inliers++;
-                        }
-                    }
-                } finally {
-                    sourceMat.release();
-                    referenceMat.release();
-                }
-            }
-
-            double inlierScore = Math.min(1.0, inliers / 20.0);
-            double matchScore = Math.min(1.0, goodMatches.size() / 30.0);
-            double score = Math.max(inlierScore, matchScore * 0.75);
-            return new OrbValidationResult(score, goodMatches.size(), inliers);
-        } finally {
-            if (sourceFull != null) sourceFull.release();
-            if (referenceFull != null) referenceFull.release();
-            if (source != null) source.release();
-            if (reference != null) reference.release();
-            sourceKeypoints.release();
-            referenceKeypoints.release();
-            sourceDescriptors.release();
-            referenceDescriptors.release();
-            inlierMask.release();
-            noMask.release();
-            matcher.clear();
-            orb.clear();
-        }
-    }
-
-    private Mat extractArtRegion(Mat gray) {
-        int h = gray.rows();
-        int w = gray.cols();
-        int artTop = (int) (h * 0.08);
-        int artBottom = (int) (h * 0.55);
-        int artLeft = (int) (w * 0.05);
-        int artRight = (int) (w * 0.95);
-        Rect artRect = new Rect(artLeft, artTop, artRight - artLeft, artBottom - artTop);
-        Mat sub = gray.submat(artRect);
-        try {
-            return sub.clone();
-        } finally {
-            sub.release();
-        }
-    }
-
-    private Mat toNormalizedGrayMat(BufferedImage image) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ImageIO.write(image, "png", output);
-        MatOfByte bytes = new MatOfByte(output.toByteArray());
-        Mat decoded = Imgcodecs.imdecode(bytes, Imgcodecs.IMREAD_COLOR);
-        Mat gray = new Mat();
-        boolean success = false;
-        try {
-            Imgproc.cvtColor(decoded, gray, Imgproc.COLOR_BGR2GRAY);
-            double scale = (double) ORB_TARGET_HEIGHT / gray.rows();
-            if (Math.abs(scale - 1.0) > 0.05) {
-                Mat resized = new Mat();
-                Imgproc.resize(gray, resized, new Size(), scale, scale, Imgproc.INTER_AREA);
-                gray.release();
-                gray = resized;
-            }
-            org.opencv.imgproc.CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
-            try {
-                clahe.apply(gray, gray);
-            } finally {
-                clahe.collectGarbage();
-            }
-            success = true;
-            return gray;
-        } finally {
-            decoded.release();
-            bytes.release();
-            if (!success) {
-                gray.release();
-            }
-        }
-    }
 }

@@ -6,8 +6,10 @@ import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Web configuration. CORS is pre-configured to allow a future React front-end
- * running on the typical dev ports (3000/5173) to call this API.
+ * Web configuration. CORS is pre-configured to allow a React front-end
+ * running on any localhost dev port to call this API — Vite (and other dev
+ * servers) pick a different port whenever the default is already taken, so a
+ * fixed allowlist breaks as soon as that happens.
  */
 @Configuration
 public class WebConfig {
@@ -18,10 +20,7 @@ public class WebConfig {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
                 registry.addMapping("/api/**")
-                        .allowedOrigins(
-                                "http://localhost:3000",
-                                "http://localhost:5173"
-                        )
+                        .allowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*")
                         .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                         .allowedHeaders("*");
             }

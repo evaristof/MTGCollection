@@ -71,6 +71,26 @@ public class ScannerController {
         }
     }
 
+    // Diagnostic endpoint — given a photo and the known-correct set/number,
+    // reports where the expected card lands in the ORB art-match ranking
+    // (rank, inliers, good matches) plus the OCR read. Handy for
+    // investigating why a particular photo does or doesn't match.
+    @PostMapping("/diagnose")
+    public ResponseEntity<Map<String, Object>> diagnose(@RequestParam("image") MultipartFile image,
+                                                        @RequestParam("set") String set,
+                                                        @RequestParam("number") String number) {
+        try {
+            BufferedImage buffered = ImageIO.read(image.getInputStream());
+            if (buffered == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Could not decode image"));
+            }
+            return ResponseEntity.ok(matchService.diagnose(buffered, set, number));
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
+            return ResponseEntity.internalServerError().body(Map.of("error", msg));
+        }
+    }
+
     @PostMapping("/sync-images")
     public ResponseEntity<Map<String, String>> syncImages(@RequestParam("set") String setCode) {
         try {

@@ -101,6 +101,14 @@
             <version>4.9.0-0</version>
         </dependency>
 
+        <!-- FuzzyWuzzy - pure-Java fuzzy string matching (no native bindings),
+             used to correct OCR'd card names/set codes against the Scryfall
+             name catalog. -->
+        <dependency>
+            <groupId>me.xdrop</groupId>
+            <artifactId>fuzzywuzzy</artifactId>
+            <version>1.4.0</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
