@@ -8,7 +8,9 @@ Gestão de uma coleção pessoal de Magic: The Gathering, com back-end Spring Bo
 - Java 21
 - Spring Boot 3.2 (Web + Data JPA + Validation)
 - Hibernate
-- H2 (banco em memória)
+- H2 para Testes (banco em memória)
+- Posgresql para Produção
+- MinIO para armazenar imagens
 - GSON (parsing das respostas do Scryfall)
 - JUnit 5 + Mockito + AssertJ
 
