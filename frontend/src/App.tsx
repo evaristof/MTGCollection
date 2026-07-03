@@ -44,6 +44,10 @@ function App() {
             <span className="sidebar__icon" aria-hidden>⌂</span>
             <span className="sidebar__label">Home</span>
           </NavLink>
+          <NavLink to="/data-management" title="Magic Data Management">
+            <span className="sidebar__icon" aria-hidden>🗄️</span>
+            <span className="sidebar__label">Magic Data Management</span>
+          </NavLink>
           <NavLink to="/sets" title="Sets">
             <span className="sidebar__icon" aria-hidden>▦</span>
             <span className="sidebar__label">Sets</span>
@@ -55,6 +59,10 @@ function App() {
           <NavLink to="/charts" title="Gráficos">
             <span className="sidebar__icon" aria-hidden>📈</span>
             <span className="sidebar__label">Gráficos</span>
+          </NavLink>
+          <NavLink to="/scanner" title="Scanner">
+            <span className="sidebar__icon" aria-hidden>🔍</span>
+            <span className="sidebar__label">Scanner</span>
           </NavLink>
         </nav>
       </aside>

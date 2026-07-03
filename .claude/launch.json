@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "mvn",
+      "runtimeArgs": [
+        "-f", "backend/pom.xml",
+        "spring-boot:run",
+        "-Dspring-boot.run.arguments=--ocr.tesseract.binary-path=C:\\PROGRA~1\\TESSER~1\\TESSER~1.EXE --server.port=8090"
+      ],
+      "port": 8090
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "frontend", "--", "--port", "0"],
+      "port": 5173,
+      "autoPort": true
+    }
+  ]
+}

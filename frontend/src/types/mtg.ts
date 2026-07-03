@@ -93,6 +93,45 @@ export interface PriceMoversResponse {
 }
 
 /**
+ * Response from POST /api/scanner/match.
+ */
+export interface ScannerMatchResult {
+  matched: boolean
+  card_name: string | null
+  set_code: string | null
+  collector_number: string | null
+  confidence: number
+  image_url: string | null
+}
+
+/**
+ * Aggregate counts shown on the Magic Data Management screen
+ * (GET /api/data-management/stats).
+ */
+export interface DataManagementStats {
+  sets_in_minio: number
+  photos_in_minio: number
+  cards_in_collection: number
+  cards_with_hash: number
+}
+
+/**
+ * Progress snapshot of an async data-management job
+ * (GET /api/data-management/jobs/{id}).
+ */
+export interface DataJobSnapshot {
+  id: string
+  type: string
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED'
+  total: number
+  processed: number
+  succeeded: number
+  skipped: number
+  errors: string[]
+  message: string | null
+}
+
+/**
  * Shape of a price lookup response (GET /api/prices/by-name or /by-number).
  */
 export interface CardPrice {
