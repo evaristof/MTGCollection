@@ -93,6 +93,19 @@ public class DataManagementService {
         return new DataStats(sets, photos, collection, withHash);
     }
 
+    /**
+     * Rebuilds the scanner's Bag-of-Visual-Words model from all reference
+     * images (vocabulary + per-card histograms). Run after bulk changes to the
+     * reference set, or when the model parameters change.
+     */
+    public void rebuildScannerModel(DataJob job) {
+        long total = hashRepository.count();
+        job.setTotal((int) total);
+        job.setMessage("Reconstruindo o modelo de reconhecimento (BoVW)…");
+        orbArtMatchService.rebuild();
+        job.setMessage("Modelo reconstruído para " + total + " cartas.");
+    }
+
     // ------------------------------------------------------------------
     // Download collection images
     // ------------------------------------------------------------------
