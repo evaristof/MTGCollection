@@ -1,6 +1,8 @@
 import type {
   CardPrice,
   CollectionCard,
+  DataJobSnapshot,
+  DataManagementStats,
   ImportJobSnapshot,
   MagicSet,
   PriceMoversResponse,
@@ -250,4 +252,20 @@ export const api = {
     request<{ status: string; message: string }>('/api/scanner/populate-hashes', {
       method: 'POST',
     }),
+
+  // Magic Data Management
+  dataStats: () => request<DataManagementStats>('/api/data-management/stats'),
+
+  dataDownloadCollection: () =>
+    request<{ job_id: string; message: string }>('/api/data-management/download-collection', {
+      method: 'POST',
+    }),
+
+  dataPruneOutsideCollection: () =>
+    request<{ job_id: string; message: string }>('/api/data-management/prune-outside-collection', {
+      method: 'DELETE',
+    }),
+
+  dataJob: (jobId: string) =>
+    request<DataJobSnapshot>(`/api/data-management/jobs/${encodeURIComponent(jobId)}`),
 }

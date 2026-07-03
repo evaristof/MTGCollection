@@ -15,8 +15,6 @@ export default function ScannerPage() {
   const [loading, setLoading] = useState(false)
   const [scannedCards, setScannedCards] = useState<ScannedCard[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [populateStatus, setPopulateStatus] = useState<string | null>(null)
-  const [populateRunning, setPopulateRunning] = useState(false)
 
   useEffect(() => {
     return () => {
@@ -58,7 +56,7 @@ export default function ScannerPage() {
           },
         ])
       } else {
-        setError('Nenhuma carta correspondente encontrada. Tente outra foto mais reta ou repopule a base de hashes do MinIO.')
+        setError('Nenhuma carta correspondente encontrada. Tente outra foto mais reta, ou baixe/registre as imagens da carta em "Magic Data Management".')
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -71,24 +69,6 @@ export default function ScannerPage() {
     setScannedCards((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const onPopulateHashes = async () => {
-    setPopulateRunning(true)
-    setPopulateStatus('Populando hashes a partir das imagens do MinIO…')
-    setError(null)
-    try {
-      await api.scannerPopulateHashes()
-      setPopulateStatus('Processo de população de hashes iniciado em background. Aguarde alguns minutos e tente escanear.')
-      setTimeout(() => {
-        setPopulateRunning(false)
-        setPopulateStatus(null)
-      }, 30000)
-    } catch (err) {
-      setPopulateRunning(false)
-      setPopulateStatus(null)
-      setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
   return (
     <section className="page">
       <div className="toolbar">
@@ -96,22 +76,11 @@ export default function ScannerPage() {
       </div>
 
       {error && <p className="error">{error}</p>}
-      {populateStatus && <p className="muted">{populateStatus}</p>}
-
-      <div className="form">
-        <h3>Base de referência</h3>
-        <p className="muted">
-          Popula a tabela de hashes a partir das imagens já armazenadas no MinIO.
-        </p>
-        <button className="btn" onClick={onPopulateHashes} disabled={loading || populateRunning}>
-          Popular Hashes do MinIO
-        </button>
-      </div>
 
       <div className="form">
         <h3>Reconhecimento por imagem</h3>
         <p className="muted">
-          Usa pHash para shortlist e OpenCV ORB para validar a melhor carta mesmo com foto de celular.
+          Reconhece a carta pela arte (OpenCV ORB), mesmo com foto de celular, foil ou em outro idioma.
         </p>
         <div className="form__grid">
           <label>

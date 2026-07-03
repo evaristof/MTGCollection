@@ -445,18 +445,11 @@ public class CardImageMatchService {
                     continue;
                 }
 
-                String hash = computeHash(image);
-                CardImageHash entity = new CardImageHash();
-                entity.setSetCode(parsed.setCode);
-                entity.setCollectorNumber(parsed.collectorNumber);
-                entity.setCardName(parsed.cardName);
-                entity.setPHash(hash);
-                entity.setMinioPath(objectKey);
-                computeAndSetEmbedding(entity, image);
-                hashRepository.save(entity);
-                count++;
-
-                log.info("Populated hash for {}/{} ({})", parsed.setCode, parsed.collectorNumber, parsed.cardName);
+                if (registerHashIfAbsent(parsed.setCode, parsed.collectorNumber,
+                        parsed.cardName, objectKey, image)) {
+                    count++;
+                    log.info("Populated hash for {}/{} ({})", parsed.setCode, parsed.collectorNumber, parsed.cardName);
+                }
             } catch (Exception e) {
                 log.warn("Failed to process MinIO object '{}': {}", objectKey, e.getMessage());
             }
@@ -469,6 +462,39 @@ public class CardImageMatchService {
             orbArtMatchService.invalidate();
         }
         return count;
+    }
+
+    /**
+     * Registers a {@link CardImageHash} row for the given card if one doesn't
+     * already exist for its set + collector number. Returns true when a new
+     * row was created. Deliberately does NOT invalidate the ORB descriptor
+     * cache — a caller populating many cards in a batch should call
+     * {@link OrbArtMatchService#invalidate()} once at the end.
+     */
+    public boolean registerHashIfAbsent(String setCode, String collectorNumber, String cardName,
+                                        String objectKey, BufferedImage image) {
+        if (hashRepository.findBySetCodeAndCollectorNumber(setCode, collectorNumber).isPresent()) {
+            return false;
+        }
+        CardImageHash entity = new CardImageHash();
+        entity.setSetCode(setCode);
+        entity.setCollectorNumber(collectorNumber);
+        entity.setCardName(cardName);
+        entity.setPHash(computeHash(image));
+        entity.setMinioPath(objectKey);
+        computeAndSetEmbedding(entity, image);
+        hashRepository.save(entity);
+        return true;
+    }
+
+    /**
+     * Extracts {@code [setCode, collectorNumber]} from a MinIO object key, or
+     * {@code null} if it doesn't follow the naming convention. Reusable by
+     * other services (e.g. pruning images that aren't in the collection).
+     */
+    public String[] parseSetAndNumber(String objectKey) {
+        ParsedObjectKey parsed = parseObjectKey(objectKey);
+        return parsed == null ? null : new String[] {parsed.setCode(), parsed.collectorNumber()};
     }
 
     private record ParsedObjectKey(String setCode, String collectorNumber, String cardName) {}

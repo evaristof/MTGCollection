@@ -6,6 +6,7 @@ import io.minio.ListObjectsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import io.minio.Result;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
@@ -19,7 +20,9 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Abstracts MinIO operations: bucket initialisation, upload, existence check
@@ -138,6 +141,62 @@ public class MinioStorageService {
             throw new RuntimeException("Failed to list objects in bucket '" + bucket + "'", e);
         }
         return keys;
+    }
+
+    /**
+     * Deletes a single object from the bucket. No-op semantics if it doesn't
+     * exist (MinIO's removeObject doesn't error on a missing key).
+     */
+    public void deleteObject(String objectKey) {
+        try {
+            minioClient.removeObject(RemoveObjectArgs.builder()
+                    .bucket(bucket)
+                    .object(objectKey)
+                    .build());
+            log.debug("Deleted '{}' from MinIO", objectKey);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to delete '" + objectKey + "' from MinIO", e);
+        }
+    }
+
+    /**
+     * Counts all objects in the bucket. Note: streams the whole listing, so
+     * O(n) — fine for the current scale.
+     */
+    public long countAllObjects() {
+        long count = 0;
+        try {
+            for (Result<Item> result : minioClient.listObjects(
+                    ListObjectsArgs.builder().bucket(bucket).recursive(true).build())) {
+                result.get();
+                count++;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to count objects in bucket '" + bucket + "'", e);
+        }
+        return count;
+    }
+
+    /**
+     * Returns the distinct top-level "set folder" names in the bucket (the
+     * {@code <setName> - <setCode>} prefix before the first slash) — i.e. how
+     * many editions have at least one image stored.
+     */
+    public Set<String> listDistinctSetFolders() {
+        Set<String> folders = new LinkedHashSet<>();
+        try {
+            for (Result<Item> result : minioClient.listObjects(
+                    ListObjectsArgs.builder().bucket(bucket).recursive(true).build())) {
+                String key = result.get().objectName();
+                int slashIdx = key.indexOf('/');
+                if (slashIdx > 0) {
+                    folders.add(key.substring(0, slashIdx));
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to list set folders in bucket '" + bucket + "'", e);
+        }
+        return folders;
     }
 
     public String getBucket() {

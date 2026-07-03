@@ -44,6 +44,10 @@ function App() {
             <span className="sidebar__icon" aria-hidden>⌂</span>
             <span className="sidebar__label">Home</span>
           </NavLink>
+          <NavLink to="/data-management" title="Magic Data Management">
+            <span className="sidebar__icon" aria-hidden>🗄️</span>
+            <span className="sidebar__label">Magic Data Management</span>
+          </NavLink>
           <NavLink to="/sets" title="Sets">
             <span className="sidebar__icon" aria-hidden>▦</span>
             <span className="sidebar__label">Sets</span>
