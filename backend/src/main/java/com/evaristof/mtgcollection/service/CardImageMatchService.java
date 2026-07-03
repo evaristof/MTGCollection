@@ -255,6 +255,11 @@ public class CardImageMatchService {
         }
         out.put("expected_in_db", true);
         out.put("expected_name", expected.getCardName());
+        // Stage-1: where does the correct card land in the BoVW shortlist
+        // ordering? This is the gate — if it's beyond the shortlist size, ORB
+        // never sees it.
+        out.put("expected_shortlist_rank",
+                orbArtMatchService.bovwShortlistRank(textSignal.image(), expectedSet, expectedNumber));
 
         int rank = -1;
         for (int i = 0; i < ranked.size(); i++) {

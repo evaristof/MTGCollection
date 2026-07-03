@@ -56,6 +56,15 @@ public class DataManagementController {
                 "message", "Remoção das imagens fora da coleção iniciada."));
     }
 
+    @PostMapping("/rebuild-scanner-model")
+    public ResponseEntity<Map<String, String>> rebuildScannerModel() {
+        DataJob job = dataJobService.submit("rebuild-scanner-model",
+                dataManagementService::rebuildScannerModel);
+        return ResponseEntity.accepted().body(Map.of(
+                "job_id", job.getId().toString(),
+                "message", "Reconstrução do modelo do scanner iniciada."));
+    }
+
     @GetMapping("/jobs/{id}")
     public ResponseEntity<DataJob.Snapshot> jobStatus(@PathVariable String id) {
         UUID uuid;
