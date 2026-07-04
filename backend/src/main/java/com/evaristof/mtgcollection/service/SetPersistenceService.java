@@ -34,10 +34,20 @@ public class SetPersistenceService {
      */
     @Transactional
     public List<MagicSet> syncSetsFromScryfall() {
+        // Preserve the blacklist flag across re-syncs (save-all upsert would
+        // otherwise reset it to false for existing sets).
+        java.util.Set<String> blacklisted = new java.util.HashSet<>();
+        for (MagicSet existing : repository.findByBlacklistedTrue()) {
+            blacklisted.add(existing.getSetCode());
+        }
         List<ScryfallSet> scryfallSets = setService.listAllSets();
         List<MagicSet> entities = new ArrayList<>(scryfallSets.size());
         for (ScryfallSet s : scryfallSets) {
-            entities.add(toEntity(s));
+            MagicSet entity = toEntity(s);
+            if (blacklisted.contains(entity.getSetCode())) {
+                entity.setBlacklisted(true);
+            }
+            entities.add(entity);
         }
         return repository.saveAll(entities);
     }

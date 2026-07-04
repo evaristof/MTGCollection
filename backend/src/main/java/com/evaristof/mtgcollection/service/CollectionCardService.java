@@ -31,16 +31,31 @@ public class CollectionCardService {
     }
 
     @Transactional
+    public CollectionCard addCardToCollection(String cardName, String setCode, boolean foil,
+                                              String language, int quantity) {
+        return addCardToCollection(cardName, setCode, foil, language, quantity, null, null);
+    }
+
+    /**
+     * Adds a card to the collection. When {@code collectorNumber} is supplied,
+     * the card is resolved by ({@code setCode}, {@code collectorNumber}) — more
+     * precise, and what the scanner provides; otherwise by ({@code cardName},
+     * {@code setCode}). Collector number, type line and price all come from that
+     * same Scryfall lookup.
+     */
     public CollectionCard addCardToCollection(String cardName,
                                               String setCode,
                                               boolean foil,
                                               String language,
-                                              int quantity) {
-        if (cardName == null || cardName.isBlank()) {
-            throw new IllegalArgumentException("cardName must not be blank");
-        }
+                                              int quantity,
+                                              String localizacao,
+                                              String collectorNumber) {
+        boolean byNumber = collectorNumber != null && !collectorNumber.isBlank();
         if (setCode == null || setCode.isBlank()) {
             throw new IllegalArgumentException("setCode must not be blank");
+        }
+        if (!byNumber && (cardName == null || cardName.isBlank())) {
+            throw new IllegalArgumentException("cardName must not be blank when collectorNumber is absent");
         }
         if (language == null || language.isBlank()) {
             throw new IllegalArgumentException("language must not be blank");
@@ -49,21 +64,54 @@ public class CollectionCardService {
             throw new IllegalArgumentException("quantity must be > 0");
         }
 
-        ScryfallCard card = cardLookupService.getCardByNameAndSet(cardName, setCode);
+        ScryfallCard card = byNumber
+                ? cardLookupService.getCardBySetAndNumber(setCode, collectorNumber.trim())
+                : cardLookupService.getCardByNameAndSet(cardName, setCode);
         if (card == null) {
-            throw new IllegalStateException(
-                    "Scryfall returned no card for name=" + cardName + " set=" + setCode);
+            throw new IllegalStateException("Scryfall returned no card for "
+                    + (byNumber ? "set=" + setCode + " number=" + collectorNumber
+                                : "name=" + cardName + " set=" + setCode));
+        }
+
+        String resolvedSet = card.getSet() != null ? card.getSet() : setCode;
+        String resolvedNumber = card.getCollectorNumber() != null ? card.getCollectorNumber()
+                : (byNumber ? collectorNumber.trim() : null);
+        String normLoc = normalizeLoc(localizacao);
+        BigDecimal price = priceFrom(card, foil);
+
+        // Merge into an existing identical stack (same set + number + foil +
+        // language + location) instead of creating a duplicate row.
+        if (resolvedNumber != null) {
+            CollectionCard existing = repository
+                    .findAllBySetCodeAndCardNumberAndFoilAndLanguage(resolvedSet, resolvedNumber, foil, language)
+                    .stream()
+                    .filter(c -> java.util.Objects.equals(normLoc, normalizeLoc(c.getLocalizacao())))
+                    .findFirst()
+                    .orElse(null);
+            if (existing != null) {
+                existing.setQuantity(existing.getQuantity() + quantity);
+                if (price != null) {
+                    existing.setPrice(price);
+                }
+                return repository.save(existing);
+            }
         }
 
         CollectionCard entity = new CollectionCard();
-        entity.setCardNumber(card.getCollectorNumber());
+        entity.setCardNumber(resolvedNumber);
         entity.setCardName(card.getName() != null ? card.getName() : cardName);
-        entity.setSetCode(card.getSet() != null ? card.getSet() : setCode);
+        entity.setSetCode(resolvedSet);
         entity.setFoil(foil);
         entity.setCardType(card.getTypeLine());
         entity.setLanguage(language);
         entity.setQuantity(quantity);
+        entity.setPrice(price);
+        entity.setLocalizacao(normLoc);
         return repository.save(entity);
+    }
+
+    private static String normalizeLoc(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     @Transactional(readOnly = true)

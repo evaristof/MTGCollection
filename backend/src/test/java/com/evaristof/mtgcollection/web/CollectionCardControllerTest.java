@@ -57,7 +57,7 @@ class CollectionCardControllerTest {
 
     @Test
     void post_addsCardAndReturnsSnakeCaseJson() throws Exception {
-        when(service.addCardToCollection(anyString(), anyString(), anyBoolean(), anyString(), anyInt()))
+        when(service.addCardToCollection(anyString(), anyString(), anyBoolean(), anyString(), anyInt(), any(), any()))
                 .thenReturn(sampleEntity());
 
         String body = objectMapper.writeValueAsString(Map.of(
@@ -80,7 +80,7 @@ class CollectionCardControllerTest {
                 .andExpect(jsonPath("$.language", is("en")))
                 .andExpect(jsonPath("$.quantity", is(4)));
 
-        verify(service).addCardToCollection("Lightning Bolt", "2x2", true, "en", 4);
+        verify(service).addCardToCollection("Lightning Bolt", "2x2", true, "en", 4, null, null);
     }
 
     @Test

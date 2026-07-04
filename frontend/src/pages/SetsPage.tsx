@@ -351,7 +351,24 @@ export default function SetsPage() {
                       <SetIcon setCode={s.set_code} setName={s.set_name} />
                     </td>
                     <td><code>{s.set_code}</code></td>
-                    <td>{s.set_name}</td>
+                    <td>
+                      {s.set_name}
+                      {s.blacklisted && (
+                        <span
+                          title="Este set está na blacklist (fora dos selects de set)"
+                          style={{
+                            marginLeft: 6,
+                            padding: '1px 6px',
+                            borderRadius: 4,
+                            fontSize: '0.72rem',
+                            background: 'var(--danger, #c0392b)',
+                            color: '#fff',
+                          }}
+                        >
+                          blacklist
+                        </span>
+                      )}
+                    </td>
                     <td>{s.release_date ?? '-'}</td>
                     <td>{s.set_type ?? '-'}</td>
                     <td>{s.card_count ?? '-'}</td>

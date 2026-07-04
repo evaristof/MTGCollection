@@ -14,4 +14,12 @@ public interface CollectionCardRepository extends JpaRepository<CollectionCard, 
 
     Optional<CollectionCard> findBySetCodeAndCardNumberAndFoilAndLanguage(
             String setCode, String cardNumber, boolean foil, String language);
+
+    /**
+     * All stacks matching set + number + foil + language. There can be more than
+     * one when the same printing is stored in different locations, so the add
+     * flow filters these by {@code localizacao} to merge into the right stack.
+     */
+    List<CollectionCard> findAllBySetCodeAndCardNumberAndFoilAndLanguage(
+            String setCode, String cardNumber, boolean foil, String language);
 }

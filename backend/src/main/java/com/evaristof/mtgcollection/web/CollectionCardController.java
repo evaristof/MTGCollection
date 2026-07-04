@@ -36,7 +36,8 @@ public class CollectionCardController {
     @PostMapping
     public ResponseEntity<CollectionCard> add(@Valid @RequestBody AddCardRequest req) {
         CollectionCard saved = service.addCardToCollection(
-                req.cardName(), req.setCode(), req.foil(), req.language(), req.quantity());
+                req.cardName(), req.setCode(), req.foil(), req.language(), req.quantity(),
+                req.localizacao(), req.cardNumber());
         return ResponseEntity.ok(saved);
     }
 
@@ -108,11 +109,14 @@ public class CollectionCardController {
      * match the rest of the API contract.</p>
      */
     public record AddCardRequest(
-            @JsonProperty("card_name") @NotBlank String cardName,
+            // Optional when card_number is supplied (resolved by set+number instead).
+            @JsonProperty("card_name") String cardName,
             @JsonProperty("set_code") @NotBlank String setCode,
             boolean foil,
             @NotBlank String language,
-            @Min(1) int quantity) {
+            @Min(1) int quantity,
+            String localizacao,
+            @JsonProperty("card_number") String cardNumber) {
     }
 
     /**
