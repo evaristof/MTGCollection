@@ -44,6 +44,11 @@ public class MagicSet {
     @Column(name = "ICON_SVG_URI")
     private String iconSvgUri;
 
+    /** When true, the set is excluded from the set dropdowns and shouldn't have
+     *  images/hashes in MinIO / card_image_hash. Kept visible in the Sets grid. */
+    @Column(name = "BLACKLISTED", nullable = false, columnDefinition = "boolean default false")
+    private boolean blacklisted;
+
     public MagicSet() {
     }
 
@@ -131,6 +136,14 @@ public class MagicSet {
 
     public void setIconSvgUri(String iconSvgUri) {
         this.iconSvgUri = iconSvgUri;
+    }
+
+    public boolean isBlacklisted() {
+        return blacklisted;
+    }
+
+    public void setBlacklisted(boolean blacklisted) {
+        this.blacklisted = blacklisted;
     }
 
     @Override

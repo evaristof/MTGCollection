@@ -162,6 +162,46 @@ public class DataManagementService {
         job.setMessage("Set " + setCode + " importado (" + count + " cartas).");
     }
 
+    /** Sets registered in {@code magic_set} that are on the blacklist. */
+    public List<MagicSet> listBlacklist() {
+        return setRepository.findByBlacklistedTrue();
+    }
+
+    /** Flags/unflags a set as blacklisted (excluded from dropdowns + downloads). */
+    public void setBlacklisted(String setCode, boolean value) {
+        MagicSet set = setRepository.findById(setCode)
+                .orElseThrow(() -> new java.util.NoSuchElementException("Set não encontrado: " + setCode));
+        set.setBlacklisted(value);
+        setRepository.save(set);
+    }
+
+    /**
+     * Removes from MinIO and {@code card_image_hash} every image of every
+     * blacklisted set, then invalidates the model. The sets stay blacklisted so
+     * a future download won't bring them back.
+     */
+    public void purgeBlacklisted(DataJob job) {
+        List<MagicSet> sets = setRepository.findByBlacklistedTrue();
+        List<CardImageHash> hashes = new ArrayList<>();
+        for (MagicSet s : sets) {
+            hashes.addAll(hashRepository.findBySetCode(s.getSetCode()));
+        }
+        job.setTotal(hashes.size());
+        job.setMessage("Removendo imagens de " + sets.size() + " set(s) da blacklist…");
+        for (CardImageHash h : hashes) {
+            try {
+                minioStorage.deleteObject(h.getMinioPath());
+            } catch (Exception e) {
+                job.addError("MinIO " + h.getMinioPath() + ": " + e.getMessage());
+            }
+            hashRepository.delete(h);
+            job.incrementProcessed();
+            job.incrementSucceeded();
+        }
+        orbArtMatchService.invalidate();
+        job.setMessage("Blacklist: removidos " + hashes.size() + " registros de " + sets.size() + " set(s).");
+    }
+
     /**
      * Deletes every image of a set from MinIO and its {@code card_image_hash}
      * rows, then invalidates the scanner model so it reloads without them.
@@ -204,7 +244,7 @@ public class DataManagementService {
     public void downloadAllScryfall(DataJob job) {
         Set<String> whitelist = new HashSet<>();
         for (MagicSet set : setRepository.findAll()) {
-            if (set.getSetCode() != null) {
+            if (set.getSetCode() != null && !set.isBlacklisted()) {
                 whitelist.add(set.getSetCode().toLowerCase(Locale.ROOT));
             }
         }

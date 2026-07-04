@@ -79,6 +79,13 @@ export interface AddCardInput {
   foil: boolean
   language: string
   quantity: number
+  /** Optional physical location; saved to the card if provided. */
+  localizacao?: string
+  /**
+   * Optional collector number. When set, the backend resolves the card by
+   * (set, number) instead of by name — more precise (e.g. from the scanner).
+   */
+  card_number?: string
 }
 
 export interface UpdateCardInput {
@@ -287,6 +294,23 @@ export const api = {
       `/api/data-management/delete-set?set=${encodeURIComponent(setCode)}`,
       { method: 'DELETE' },
     ),
+
+  // Set blacklist
+  dataBlacklist: () => request<MagicSet[]>('/api/data-management/blacklist'),
+  dataBlacklistAdd: (setCode: string) =>
+    request<{ message: string }>(
+      `/api/data-management/blacklist?set=${encodeURIComponent(setCode)}`,
+      { method: 'POST' },
+    ),
+  dataBlacklistRemove: (setCode: string) =>
+    request<{ message: string }>(
+      `/api/data-management/blacklist?set=${encodeURIComponent(setCode)}`,
+      { method: 'DELETE' },
+    ),
+  dataBlacklistPurge: () =>
+    request<{ job_id: string; message: string }>('/api/data-management/blacklist/purge', {
+      method: 'POST',
+    }),
 
   dataJob: (jobId: string) =>
     request<DataJobSnapshot>(`/api/data-management/jobs/${encodeURIComponent(jobId)}`),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
+import { SetCombo } from '../components/SetCombo'
 import type { DataJobSnapshot, DataManagementStats, MagicSet } from '../types/mtg'
 
 function jobLabel(type: string): string {
@@ -16,6 +17,8 @@ function jobLabel(type: string): string {
       return 'Importação de imagens do set'
     case 'delete-set':
       return 'Remoção do set'
+    case 'purge-blacklist':
+      return 'Remoção das imagens dos sets da blacklist'
     default:
       return type
   }
@@ -29,6 +32,11 @@ export default function DataManagementPage() {
   const [job, setJob] = useState<DataJobSnapshot | null>(null)
   const [sets, setSets] = useState<MagicSet[]>([])
   const [selectedSet, setSelectedSet] = useState('')
+  const [blacklist, setBlacklist] = useState<MagicSet[]>([])
+  const [blSelected, setBlSelected] = useState('')
+  const [blBusy, setBlBusy] = useState(false)
+  const [blChecked, setBlChecked] = useState<Set<string>>(new Set())
+  const [blFilter, setBlFilter] = useState('')
   // Stays true from the "finalizar download" click until the job settles, so
   // the button doesn't flip back to "Finalizar" while the worker winds down.
   const [cancelRequested, setCancelRequested] = useState(false)
@@ -44,6 +52,16 @@ export default function DataManagementPage() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoadingStats(false)
+    }
+  }, [])
+
+  const reloadSets = useCallback(async () => {
+    try {
+      const [all, bl] = await Promise.all([api.listSets(), api.dataBlacklist()])
+      setSets(all)
+      setBlacklist(bl)
+    } catch {
+      // ignore — lists stay as they are
     }
   }, [])
 
@@ -80,13 +98,7 @@ export default function DataManagementPage() {
   // reappears when you navigate away and come back).
   useEffect(() => {
     void loadStats()
-    void (async () => {
-      try {
-        setSets(await api.listSets())
-      } catch {
-        // ignore — set list stays empty
-      }
-    })()
+    void reloadSets()
     void (async () => {
       try {
         const active = await api.dataActiveJob()
@@ -102,10 +114,69 @@ export default function DataManagementPage() {
       if (pollRef.current) clearInterval(pollRef.current)
       if (hideRef.current) clearTimeout(hideRef.current)
     }
-  }, [loadStats, pollJob])
+  }, [loadStats, pollJob, reloadSets])
 
   const jobRunning = job != null && (job.status === 'PENDING' || job.status === 'RUNNING')
   const busy = jobRunning
+
+  const selectableSets = sets.filter((s) => !s.blacklisted)
+  const selectableOptions = selectableSets.map((s) => ({ code: s.set_code, name: s.set_name }))
+
+  const onAddBlacklist = async () => {
+    if (!blSelected) return
+    setBlBusy(true)
+    setError(null)
+    try {
+      await api.dataBlacklistAdd(blSelected)
+      setBlSelected('')
+      await reloadSets()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBlBusy(false)
+    }
+  }
+
+  const toggleBlChecked = (code: string) =>
+    setBlChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code)
+      else next.add(code)
+      return next
+    })
+
+  const blFilterQ = blFilter.trim().toLowerCase()
+  const filteredBlacklist = blFilterQ
+    ? blacklist.filter(
+        (s) =>
+          s.set_name.toLowerCase().includes(blFilterQ) || s.set_code.toLowerCase().includes(blFilterQ),
+      )
+    : blacklist
+  const allBlChecked =
+    filteredBlacklist.length > 0 && filteredBlacklist.every((s) => blChecked.has(s.set_code))
+  const toggleAllBl = () =>
+    setBlChecked((prev) => {
+      const next = new Set(prev)
+      // Toggle only the currently visible (filtered) rows.
+      if (allBlChecked) filteredBlacklist.forEach((s) => next.delete(s.set_code))
+      else filteredBlacklist.forEach((s) => next.add(s.set_code))
+      return next
+    })
+
+  const onRemoveSelectedBlacklist = async () => {
+    if (blChecked.size === 0) return
+    setBlBusy(true)
+    setError(null)
+    try {
+      await Promise.all(Array.from(blChecked).map((code) => api.dataBlacklistRemove(code)))
+      setBlChecked(new Set())
+      await reloadSets()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBlBusy(false)
+    }
+  }
 
   const start = async (
     kick: () => Promise<{ job_id: string; message: string }>,
@@ -224,19 +295,16 @@ export default function DataManagementPage() {
           histogramas) ou deletar (remove as imagens do MinIO e os registros da base).
         </p>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-          <select
-            value={selectedSet}
-            onChange={(e) => setSelectedSet(e.target.value)}
-            disabled={busy}
-            style={{ minWidth: 260, padding: '0.4rem' }}
-          >
-            <option value="">Selecione um set…</option>
-            {sets.map((s) => (
-              <option key={s.set_code} value={s.set_code}>
-                {s.set_name} ({s.set_code})
-              </option>
-            ))}
-          </select>
+          <div style={{ minWidth: 280 }}>
+            <SetCombo
+              id="ops-set"
+              value={selectedSet}
+              onChange={setSelectedSet}
+              options={selectableOptions}
+              emptyLabel="Selecione um set…"
+              disabled={busy}
+            />
+          </div>
           <button
             className="btn"
             disabled={busy || !selectedSet}
@@ -257,6 +325,98 @@ export default function DataManagementPage() {
             {jobRunning && job?.type === 'delete-set' ? 'Deletando…' : 'Deletar Set'}
           </button>
         </div>
+      </div>
+
+      <div className="form">
+        <h3>Blacklist de sets</h3>
+        <p className="muted">
+          Sets na blacklist ficam fora dos selects de set (em todas as telas) e não são baixados. A
+          tela de Sets continua mostrando todos.
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ minWidth: 280 }}>
+            <SetCombo
+              id="bl-set"
+              value={blSelected}
+              onChange={setBlSelected}
+              options={selectableOptions}
+              emptyLabel="Selecione um set…"
+              disabled={busy || blBusy}
+            />
+          </div>
+          <button className="btn" disabled={busy || blBusy || !blSelected} onClick={() => void onAddBlacklist()}>
+            Adicionar à blacklist
+          </button>
+          <button
+            className="btn btn--danger"
+            disabled={busy || blacklist.length === 0}
+            onClick={() =>
+              void start(
+                api.dataBlacklistPurge,
+                `Isto vai APAGAR do MinIO e da base as imagens de ${blacklist.length} set(s) da blacklist. Continuar?`,
+              )
+            }
+          >
+            {jobRunning && job?.type === 'purge-blacklist' ? 'Removendo…' : 'Remover do MinIO e da base'}
+          </button>
+        </div>
+
+        {blacklist.length > 0 ? (
+          <div style={{ marginTop: '0.75rem' }}>
+            <input
+              value={blFilter}
+              onChange={(e) => setBlFilter(e.target.value)}
+              placeholder="Filtrar por nome ou código…"
+              style={{ width: '100%', maxWidth: 360, padding: '0.4rem', marginBottom: '0.4rem' }}
+            />
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem', flexWrap: 'wrap' }}
+            >
+              <label className="muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <input type="checkbox" checked={allBlChecked} onChange={toggleAllBl} disabled={busy || blBusy} />
+                Selecionar todos ({filteredBlacklist.length})
+              </label>
+              <button
+                className="btn btn--danger btn--sm"
+                disabled={busy || blBusy || blChecked.size === 0}
+                onClick={() => void onRemoveSelectedBlacklist()}
+              >
+                {blBusy ? 'Removendo…' : `Remover selecionados da blacklist (${blChecked.size})`}
+              </button>
+            </div>
+            <div
+              style={{
+                maxHeight: 240,
+                overflowY: 'auto',
+                border: '1px solid var(--border, #ccc)',
+                borderRadius: 6,
+                padding: '4px 8px',
+              }}
+            >
+              {filteredBlacklist.length === 0 && (
+                <p className="muted" style={{ margin: '4px 0' }}>Nenhum set corresponde ao filtro.</p>
+              )}
+              {filteredBlacklist.map((s) => (
+                <label
+                  key={s.set_code}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={blChecked.has(s.set_code)}
+                    onChange={() => toggleBlChecked(s.set_code)}
+                    disabled={busy || blBusy}
+                  />
+                  <span>
+                    {s.set_name} <span className="muted">({s.set_code})</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p className="muted" style={{ marginTop: '0.5rem' }}>Nenhum set na blacklist.</p>
+        )}
       </div>
 
       <div className="form">

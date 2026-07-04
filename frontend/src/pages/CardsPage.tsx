@@ -29,6 +29,8 @@ const EMPTY_ADD: AddFormState = {
   foil: false,
   language: '',
   quantity: 0,
+  localizacao: '',
+  card_number: '',
 }
 
 /**
@@ -146,7 +148,7 @@ export default function CardsPage() {
   const setOptions = useMemo(
     () =>
       sets
-        .slice()
+        .filter((s) => !s.blacklisted)
         .sort((a, b) =>
           a.set_name.localeCompare(b.set_name, undefined, { sensitivity: 'base' }),
         )
@@ -219,8 +221,10 @@ export default function CardsPage() {
   const onAdd = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    if (!addForm.card_name.trim() || !addForm.set_code.trim() || !addForm.language.trim()) {
-      setError('Nome, set e linguagem são obrigatórios.')
+    const hasName = !!addForm.card_name.trim()
+    const hasNumber = !!addForm.card_number?.trim()
+    if ((!hasName && !hasNumber) || !addForm.set_code.trim() || !addForm.language.trim()) {
+      setError('Set e linguagem são obrigatórios, além do nome OU do número da carta.')
       return
     }
     if (addForm.quantity < 1) {
@@ -235,6 +239,8 @@ export default function CardsPage() {
         foil: addForm.foil,
         language: addForm.language.trim(),
         quantity: addForm.quantity,
+        localizacao: addForm.localizacao?.trim() || undefined,
+        card_number: addForm.card_number?.trim() || undefined,
       })
       setAddForm(EMPTY_ADD)
       await loadCards()
@@ -579,12 +585,11 @@ export default function CardsPage() {
         </p>
         <div className="form__grid">
           <label>
-            <span>Nome da carta*</span>
+            <span>Nome da carta</span>
             <input
-              required
               value={addForm.card_name}
               onChange={(e) => setAddForm({ ...addForm, card_name: e.target.value })}
-              placeholder="Lightning Bolt"
+              placeholder="Lightning Bolt (ou informe só o número)"
             />
           </label>
           <label>
@@ -614,6 +619,22 @@ export default function CardsPage() {
               required
               value={addForm.quantity}
               onChange={(e) => setAddForm({ ...addForm, quantity: Number(e.target.value) })}
+            />
+          </label>
+          <label>
+            <span>Número (opcional)</span>
+            <input
+              value={addForm.card_number ?? ''}
+              onChange={(e) => setAddForm({ ...addForm, card_number: e.target.value })}
+              placeholder="ex: 75 — busca por set+número"
+            />
+          </label>
+          <label>
+            <span>Localização (opcional)</span>
+            <input
+              value={addForm.localizacao ?? ''}
+              onChange={(e) => setAddForm({ ...addForm, localizacao: e.target.value })}
+              placeholder="ex: Caixa 3"
             />
           </label>
           <label className="checkbox">

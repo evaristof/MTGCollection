@@ -1,5 +1,6 @@
 package com.evaristof.mtgcollection.web;
 
+import com.evaristof.mtgcollection.domain.MagicSet;
 import com.evaristof.mtgcollection.service.DataJob;
 import com.evaristof.mtgcollection.service.DataJobService;
 import com.evaristof.mtgcollection.service.DataManagementService;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -82,6 +84,32 @@ public class DataManagementController {
         return ResponseEntity.accepted().body(Map.of(
                 "job_id", job.getId().toString(),
                 "message", "Remoção do set " + set + " iniciada."));
+    }
+
+    @GetMapping("/blacklist")
+    public ResponseEntity<List<MagicSet>> listBlacklist() {
+        return ResponseEntity.ok(dataManagementService.listBlacklist());
+    }
+
+    @PostMapping("/blacklist")
+    public ResponseEntity<Map<String, String>> addToBlacklist(@RequestParam("set") String set) {
+        dataManagementService.setBlacklisted(set, true);
+        return ResponseEntity.ok(Map.of("message", "Set " + set + " adicionado à blacklist."));
+    }
+
+    @DeleteMapping("/blacklist")
+    public ResponseEntity<Map<String, String>> removeFromBlacklist(@RequestParam("set") String set) {
+        dataManagementService.setBlacklisted(set, false);
+        return ResponseEntity.ok(Map.of("message", "Set " + set + " removido da blacklist."));
+    }
+
+    @PostMapping("/blacklist/purge")
+    public ResponseEntity<Map<String, String>> purgeBlacklist() {
+        DataJob job = dataJobService.submit("purge-blacklist",
+                dataManagementService::purgeBlacklisted);
+        return ResponseEntity.accepted().body(Map.of(
+                "job_id", job.getId().toString(),
+                "message", "Remoção das imagens dos sets da blacklist iniciada."));
     }
 
     @PostMapping("/rebuild-scanner-model")
