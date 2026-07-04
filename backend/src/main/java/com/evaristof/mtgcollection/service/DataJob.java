@@ -15,13 +15,16 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class DataJob {
 
-    public enum Status { PENDING, RUNNING, DONE, FAILED }
+    public enum Status { PENDING, RUNNING, DONE, FAILED, CANCELLED }
 
     private final UUID id = UUID.randomUUID();
     private final String type;
     private final Instant createdAt = Instant.now();
 
     private volatile Status status = Status.PENDING;
+    // Cooperative cancellation: the worker checks this between units of work
+    // and stops gracefully (used by the "finalizar download" button).
+    private volatile boolean cancelRequested = false;
     private volatile int total = 0;
     private final AtomicInteger processed = new AtomicInteger(0);
     // "succeeded" = images downloaded / rows created / objects deleted,
@@ -39,6 +42,8 @@ public class DataJob {
     public String getType() { return type; }
     public Instant getCreatedAt() { return createdAt; }
     public Status getStatus() { return status; }
+    public boolean isCancelRequested() { return cancelRequested; }
+    public void requestCancel() { this.cancelRequested = true; }
     public int getTotal() { return total; }
     public int getProcessed() { return processed.get(); }
     public int getSucceeded() { return succeeded.get(); }
@@ -48,6 +53,7 @@ public class DataJob {
 
     public void setStatus(Status status) { this.status = status; }
     public void setTotal(int total) { this.total = total; }
+    public void setProcessed(int value) { processed.set(value); }
     public int incrementProcessed() { return processed.incrementAndGet(); }
     public int incrementSucceeded() { return succeeded.incrementAndGet(); }
     public int incrementSkipped() { return skipped.incrementAndGet(); }

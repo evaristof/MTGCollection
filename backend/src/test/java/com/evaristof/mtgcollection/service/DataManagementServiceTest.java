@@ -17,6 +17,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -32,9 +33,12 @@ class DataManagementServiceTest {
     private final CardBatchLookupService batch = mock(CardBatchLookupService.class);
     private final CardImageMatchService match = mock(CardImageMatchService.class);
     private final OrbArtMatchService orb = mock(OrbArtMatchService.class);
+    private final com.evaristof.mtgcollection.scryfall.ScryfallHttpClient scryfall =
+            mock(com.evaristof.mtgcollection.scryfall.ScryfallHttpClient.class);
 
     private final DataManagementService service = new DataManagementService(
-            collectionRepo, hashRepo, setRepo, minio, batch, match, orb, HttpClient.newHttpClient());
+            collectionRepo, hashRepo, setRepo, minio, batch, match, orb,
+            scryfall, new com.google.gson.Gson(), HttpClient.newHttpClient());
 
     @Test
     void stats_aggregatesCountsFromMinioAndRepos() {
@@ -89,6 +93,55 @@ class DataManagementServiceTest {
         // silently kept) and no orphan-hash lookup blows up.
         verify(minio).deleteObject(weirdKey);
         assertThat(job.getSucceeded()).isEqualTo(1);
+    }
+
+    @Test
+    void processBulkCards_skipsCardAlreadyPresent_andCountsSet() {
+        // Card lea/232 is already in MinIO *and* the hash index → skipped with
+        // no download/upload/registration. Its set counts as one edition seen.
+        String objectKey = "Limited Edition Alpha - lea/232-Black Lotus.png";
+        when(minio.objectKey("Limited Edition Alpha", "lea", "232", "Black Lotus"))
+                .thenReturn(objectKey);
+
+        Set<String> whitelist = Set.of("lea");
+        Set<String> existingHashKeys = new java.util.HashSet<>(Set.of("lea|232"));
+        Set<String> existingObjectKeys = new java.util.HashSet<>(Set.of(objectKey));
+
+        String bulk = "[{\"name\":\"Black Lotus\",\"set\":\"lea\","
+                + "\"set_name\":\"Limited Edition Alpha\",\"collector_number\":\"232\","
+                + "\"image_uris\":{\"png\":\"https://img/lea-232.png\"}}]";
+
+        DataJob job = new DataJob("download-all-scryfall");
+        service.processBulkCards(new java.io.StringReader(bulk), whitelist,
+                existingHashKeys, existingObjectKeys, job);
+
+        verify(minio, never()).upload(any(), any());
+        verify(minio, never()).download(any());
+        verify(match, never()).registerHashIfAbsent(any(), any(), any(), any(), any(), anyBoolean());
+        assertThat(job.getSkipped()).isEqualTo(1);
+        assertThat(job.getSucceeded()).isEqualTo(0);
+        assertThat(job.getProcessed()).isEqualTo(1); // one edition seen
+    }
+
+    @Test
+    void processBulkCards_ignoresCardsWhoseSetIsNotInWhitelist() {
+        // A card from a set not in magic_set (e.g. a digital-only set) must be
+        // skipped entirely: no download, not counted, no set marked seen.
+        Set<String> whitelist = Set.of("lea");
+        Set<String> empty = new java.util.HashSet<>();
+
+        String bulk = "[{\"name\":\"Some Token\",\"set\":\"tmh3\","
+                + "\"collector_number\":\"1\",\"image_uris\":{\"png\":\"https://img/x.png\"}}]";
+
+        DataJob job = new DataJob("download-all-scryfall");
+        service.processBulkCards(new java.io.StringReader(bulk), whitelist, empty, empty, job);
+
+        verify(minio, never()).upload(any(), any());
+        verify(minio, never()).objectKey(any(), any(), any(), any());
+        assertThat(job.getProcessed()).isEqualTo(0);
+        assertThat(job.getSucceeded()).isEqualTo(0);
+        assertThat(job.getSkipped()).isEqualTo(0);
+        assertThat(job.getErrors()).isEmpty();
     }
 
     @Test

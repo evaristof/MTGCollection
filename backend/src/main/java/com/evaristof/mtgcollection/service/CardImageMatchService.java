@@ -43,10 +43,10 @@ public class CardImageMatchService {
 
     // OpenCV native library is loaded once, by CardPerspectiveService's own
     // static initializer — loading it a second time from here corrupted
-    // native memory (same class of bug as the DJL/ONNX conflict described
-    // in CnnEmbeddingService). CardPerspectiveService is a required
-    // constructor dependency below, so its class (and static initializer)
-    // is guaranteed to load before this class is used.
+    // native memory (the same class of bug that got the DJL/ONNX CNN embedding
+    // experiment removed). CardPerspectiveService is a required constructor
+    // dependency below, so its class (and static initializer) is guaranteed to
+    // load before this class is used.
 
     private static final Logger log = LoggerFactory.getLogger(CardImageMatchService.class);
     private static final int HASH_BIT_RESOLUTION = 64;
@@ -83,7 +83,6 @@ public class CardImageMatchService {
     private final MagicSetRepository setRepository;
     private final MinioStorageService minioStorage;
     private final ScryfallHttpClient scryfallClient;
-    private final CnnEmbeddingService cnnEmbeddingService;
     private final CardPerspectiveService perspectiveService;
     private final TesseractOcrService ocrService;
     private final CardNameCatalogService nameCatalogService;
@@ -105,7 +104,6 @@ public class CardImageMatchService {
                                  MagicSetRepository setRepository,
                                  MinioStorageService minioStorage,
                                  ScryfallHttpClient scryfallClient,
-                                 CnnEmbeddingService cnnEmbeddingService,
                                  CardPerspectiveService perspectiveService,
                                  TesseractOcrService ocrService,
                                  CardNameCatalogService nameCatalogService,
@@ -115,7 +113,6 @@ public class CardImageMatchService {
         this.setRepository = setRepository;
         this.minioStorage = minioStorage;
         this.scryfallClient = scryfallClient;
-        this.cnnEmbeddingService = cnnEmbeddingService;
         this.perspectiveService = perspectiveService;
         this.ocrService = ocrService;
         this.nameCatalogService = nameCatalogService;
@@ -478,6 +475,19 @@ public class CardImageMatchService {
      */
     public boolean registerHashIfAbsent(String setCode, String collectorNumber, String cardName,
                                         String objectKey, BufferedImage image) {
+        return registerHashIfAbsent(setCode, collectorNumber, cardName, objectKey, image, false);
+    }
+
+    /**
+     * Same as {@link #registerHashIfAbsent(String, String, String, String, BufferedImage)},
+     * but when {@code deferHistogram} is true the (expensive, OpenCV-locked)
+     * BoVW histogram is left null for a later {@link OrbArtMatchService#rebuild()}
+     * to fill in one pass. Used by the full Scryfall download, which rebuilds the
+     * model at the end anyway — computing per-card histograms there would just
+     * serialize the whole download on the OpenCV lock for nothing.
+     */
+    public boolean registerHashIfAbsent(String setCode, String collectorNumber, String cardName,
+                                        String objectKey, BufferedImage image, boolean deferHistogram) {
         if (hashRepository.findBySetCodeAndCollectorNumber(setCode, collectorNumber).isPresent()) {
             return false;
         }
@@ -487,7 +497,10 @@ public class CardImageMatchService {
         entity.setCardName(cardName);
         entity.setPHash(computeHash(image));
         entity.setMinioPath(objectKey);
-        computeAndSetEmbedding(entity, image);
+        // If a scanner model already exists, compute this card's BoVW histogram
+        // now so it becomes searchable immediately (no full rebuild needed).
+        // Returns null when no model is loaded yet — filled by a later rebuild.
+        entity.setBovwHistogram(deferHistogram ? null : orbArtMatchService.computeHistogramString(image));
         hashRepository.save(entity);
         return true;
     }
@@ -645,7 +658,6 @@ public class CardImageMatchService {
         entity.setCardName(name != null ? name : "Unknown");
         entity.setPHash(hash);
         entity.setMinioPath(objectKey);
-        computeAndSetEmbedding(entity, image);
         hashRepository.save(entity);
 
         log.info("Synced image hash for {}/{} ({})", setCode, collectorNumber, name);
@@ -669,11 +681,6 @@ public class CardImageMatchService {
             throw new IOException("Image download failed: " + response.statusCode() + " for " + url);
         }
         return response.body();
-    }
-
-    private void computeAndSetEmbedding(CardImageHash entity, BufferedImage image) {
-        // CNN embedding disabled: DJL/ONNX Runtime native libs conflict with OpenCV on Windows.
-        // CNN embeddings can be populated by an external Python/CLI tool if needed.
     }
 
 }

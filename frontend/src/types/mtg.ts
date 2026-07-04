@@ -122,7 +122,7 @@ export interface DataManagementStats {
 export interface DataJobSnapshot {
   id: string
   type: string
-  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED'
+  status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'CANCELLED'
   total: number
   processed: number
   succeeded: number

@@ -31,8 +31,16 @@ public class CardImageHash {
     @Column(name = "MINIO_PATH", nullable = false)
     private String minioPath;
 
-    @Column(name = "CNN_EMBEDDING", columnDefinition = "TEXT")
-    private String cnnEmbedding;
+    /**
+     * Cached Bag-of-Visual-Words histogram for the scanner's stage-1 shortlist,
+     * stored as a sparse "word:count,word:count,…" string of RAW visual-word
+     * counts (TF-IDF weighting is recomputed at load). Persisting it means the
+     * scanner loads its model at startup instead of re-extracting ORB features
+     * from every reference image — essential once the reference set reaches
+     * tens of thousands of cards. Nullable until the model is (re)built.
+     */
+    @Column(name = "BOVW_HISTOGRAM", columnDefinition = "TEXT")
+    private String bovwHistogram;
 
     public Long getId() {
         return id;
@@ -82,11 +90,11 @@ public class CardImageHash {
         this.minioPath = minioPath;
     }
 
-    public String getCnnEmbedding() {
-        return cnnEmbedding;
+    public String getBovwHistogram() {
+        return bovwHistogram;
     }
 
-    public void setCnnEmbedding(String cnnEmbedding) {
-        this.cnnEmbedding = cnnEmbedding;
+    public void setBovwHistogram(String bovwHistogram) {
+        this.bovwHistogram = bovwHistogram;
     }
 }
