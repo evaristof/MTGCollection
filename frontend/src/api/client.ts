@@ -266,6 +266,39 @@ export const api = {
       method: 'DELETE',
     }),
 
+  dataDownloadAllScryfall: () =>
+    request<{ job_id: string; message: string }>('/api/data-management/download-all-scryfall', {
+      method: 'POST',
+    }),
+
+  dataRebuildScannerModel: () =>
+    request<{ job_id: string; message: string }>('/api/data-management/rebuild-scanner-model', {
+      method: 'POST',
+    }),
+
+  dataDownloadSet: (setCode: string) =>
+    request<{ job_id: string; message: string }>(
+      `/api/data-management/download-set?set=${encodeURIComponent(setCode)}`,
+      { method: 'POST' },
+    ),
+
+  dataDeleteSet: (setCode: string) =>
+    request<{ job_id: string; message: string }>(
+      `/api/data-management/delete-set?set=${encodeURIComponent(setCode)}`,
+      { method: 'DELETE' },
+    ),
+
   dataJob: (jobId: string) =>
     request<DataJobSnapshot>(`/api/data-management/jobs/${encodeURIComponent(jobId)}`),
+
+  // Requests cooperative cancellation of a running job (e.g. "finalizar
+  // download"). The worker stops between cards and settles as CANCELLED.
+  dataCancelJob: (jobId: string) =>
+    request<DataJobSnapshot>(`/api/data-management/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: 'POST',
+    }),
+
+  // Returns the running job, or undefined (204) when nothing is running.
+  dataActiveJob: () =>
+    request<DataJobSnapshot | undefined>('/api/data-management/jobs/active'),
 }

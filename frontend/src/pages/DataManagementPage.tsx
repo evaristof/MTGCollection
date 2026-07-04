@@ -1,8 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
-import type { DataJobSnapshot, DataManagementStats } from '../types/mtg'
+import type { DataJobSnapshot, DataManagementStats, MagicSet } from '../types/mtg'
 
-type JobKind = 'download' | 'prune'
+function jobLabel(type: string): string {
+  switch (type) {
+    case 'download-all-scryfall':
+      return 'Download do Scryfall inteiro'
+    case 'download-collection':
+      return 'Download de imagens da coleção'
+    case 'prune-outside-collection':
+      return 'Remoção de imagens fora da coleção'
+    case 'rebuild-scanner-model':
+      return 'Reconstrução do modelo do scanner'
+    case 'download-set':
+      return 'Importação de imagens do set'
+    case 'delete-set':
+      return 'Remoção do set'
+    default:
+      return type
+  }
+}
 
 export default function DataManagementPage() {
   const [stats, setStats] = useState<DataManagementStats | null>(null)
@@ -10,10 +27,13 @@ export default function DataManagementPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [job, setJob] = useState<DataJobSnapshot | null>(null)
-  const [jobKind, setJobKind] = useState<JobKind | null>(null)
-  const [populateStatus, setPopulateStatus] = useState<string | null>(null)
-  const [populating, setPopulating] = useState(false)
+  const [sets, setSets] = useState<MagicSet[]>([])
+  const [selectedSet, setSelectedSet] = useState('')
+  // Stays true from the "finalizar download" click until the job settles, so
+  // the button doesn't flip back to "Finalizar" while the worker winds down.
+  const [cancelRequested, setCancelRequested] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadStats = useCallback(async () => {
     setLoadingStats(true)
@@ -27,16 +47,6 @@ export default function DataManagementPage() {
     }
   }, [])
 
-  useEffect(() => {
-    void loadStats()
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [loadStats])
-
-  const jobRunning = job != null && (job.status === 'PENDING' || job.status === 'RUNNING')
-  const busy = jobRunning || populating
-
   const pollJob = useCallback(
     (jobId: string) => {
       if (pollRef.current) clearInterval(pollRef.current)
@@ -44,10 +54,17 @@ export default function DataManagementPage() {
         try {
           const snap = await api.dataJob(jobId)
           setJob(snap)
-          if (snap.status === 'DONE' || snap.status === 'FAILED') {
+          if (snap.status === 'DONE' || snap.status === 'FAILED' || snap.status === 'CANCELLED') {
             if (pollRef.current) clearInterval(pollRef.current)
             pollRef.current = null
             void loadStats()
+            // On success/cancel, let the final state linger then clear it. The
+            // full-download summary (edições/imagens) stays up for 10 minutes so
+            // it's easy to read after a long run; quick jobs clear after 6s.
+            if (snap.status === 'DONE' || snap.status === 'CANCELLED') {
+              const hideAfterMs = snap.type === 'download-all-scryfall' ? 10 * 60 * 1000 : 6000
+              hideRef.current = setTimeout(() => setJob(null), hideAfterMs)
+            }
           }
         } catch (err) {
           if (pollRef.current) clearInterval(pollRef.current)
@@ -59,63 +76,80 @@ export default function DataManagementPage() {
     [loadStats],
   )
 
-  const onDownloadCollection = async () => {
+  // On mount: load stats, the set list, and resume any running job (so progress
+  // reappears when you navigate away and come back).
+  useEffect(() => {
+    void loadStats()
+    void (async () => {
+      try {
+        setSets(await api.listSets())
+      } catch {
+        // ignore — set list stays empty
+      }
+    })()
+    void (async () => {
+      try {
+        const active = await api.dataActiveJob()
+        if (active) {
+          setJob(active)
+          pollJob(active.id)
+        }
+      } catch {
+        // ignore — no active job
+      }
+    })()
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (hideRef.current) clearTimeout(hideRef.current)
+    }
+  }, [loadStats, pollJob])
+
+  const jobRunning = job != null && (job.status === 'PENDING' || job.status === 'RUNNING')
+  const busy = jobRunning
+
+  const start = async (
+    kick: () => Promise<{ job_id: string; message: string }>,
+    confirmMsg?: string,
+  ) => {
+    if (confirmMsg && !confirm(confirmMsg)) return
     setError(null)
-    setJobKind('download')
+    setCancelRequested(false)
+    if (hideRef.current) clearTimeout(hideRef.current)
     setJob(null)
     try {
-      const { job_id } = await api.dataDownloadCollection()
+      const { job_id } = await kick()
       pollJob(job_id)
     } catch (err) {
-      setJobKind(null)
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  const onPrune = async () => {
-    if (
-      !confirm(
-        'Isto vai APAGAR do MinIO todas as imagens que não são cartas da sua coleção. Tem certeza?',
-      )
-    ) {
-      return
-    }
-    setError(null)
-    setJobKind('prune')
-    setJob(null)
+  const onCancelJob = async () => {
+    if (!job) return
+    if (!confirm('Finalizar o download agora? As imagens já baixadas são mantidas.')) return
+    setCancelRequested(true)
     try {
-      const { job_id } = await api.dataPruneOutsideCollection()
-      pollJob(job_id)
+      const snap = await api.dataCancelJob(job.id)
+      setJob(snap) // reflects the cancel request immediately; polling settles it
     } catch (err) {
-      setJobKind(null)
+      setCancelRequested(false)
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
   const onPopulateHashes = async () => {
-    setPopulating(true)
-    setPopulateStatus('Populando hashes a partir das imagens do MinIO…')
     setError(null)
     try {
       await api.scannerPopulateHashes()
-      setPopulateStatus(
-        'Processo de população de hashes iniciado em background. Aguarde alguns minutos.',
-      )
-      setTimeout(() => {
-        setPopulating(false)
-        setPopulateStatus(null)
-        void loadStats()
-      }, 30000)
+      setError(null)
+      setTimeout(() => void loadStats(), 30000)
     } catch (err) {
-      setPopulating(false)
-      setPopulateStatus(null)
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
-  const jobLabel = jobKind === 'download' ? 'Download de imagens' : 'Remoção de imagens'
-  const pct =
-    job && job.total > 0 ? Math.round((job.processed / job.total) * 100) : job ? 0 : null
+  const isDownloadAll = job?.type === 'download-all-scryfall'
+  const pct = job && job.total > 0 ? Math.round((job.processed / job.total) * 100) : job ? 0 : null
 
   return (
     <section className="page">
@@ -147,25 +181,102 @@ export default function DataManagementPage() {
       </div>
 
       <div className="form">
-        <h3>Imagens da coleção</h3>
+        <h3>Base completa do Scryfall</h3>
         <p className="muted">
-          Baixa do Scryfall as imagens de todas as cartas da sua coleção, guarda no MinIO e
-          registra na base do scanner (card_image_hash).
+          Baixa as imagens de <strong>todas as edições</strong> para o MinIO e registra na base do
+          scanner, para reconhecer qualquer carta (inclusive as que você não tem). É um processo
+          longo (dezenas de GB / horas) que roda em segundo plano — o progresso reaparece ao voltar
+          nesta tela. Ao final, reconstrói o modelo de reconhecimento.
         </p>
-        <button className="btn" onClick={() => void onDownloadCollection()} disabled={busy}>
-          {jobRunning && jobKind === 'download' ? 'Baixando…' : 'Download Imagens Coleção'}
+        <button
+          className="btn"
+          onClick={() =>
+            void start(
+              api.dataDownloadAllScryfall,
+              'Isto vai baixar TODAS as edições do Scryfall (dezenas de GB, pode levar horas). Continuar?',
+            )
+          }
+          disabled={busy}
+        >
+          {jobRunning && isDownloadAll ? 'Baixando…' : 'Download Scryfall Inteiro'}
         </button>
       </div>
 
       <div className="form">
-        <h3>Base de referência do scanner</h3>
+        <h3>Imagens da coleção</h3>
         <p className="muted">
-          Cria os hashes que faltam a partir das imagens já presentes no MinIO.
+          Baixa do Scryfall as imagens de todas as cartas da sua coleção, guarda no MinIO e registra
+          na base do scanner.
         </p>
-        <button className="btn" onClick={() => void onPopulateHashes()} disabled={busy}>
-          Popular Hashes do MinIO
+        <button
+          className="btn"
+          onClick={() => void start(api.dataDownloadCollection)}
+          disabled={busy}
+        >
+          {jobRunning && job?.type === 'download-collection' ? 'Baixando…' : 'Download Imagens Coleção'}
         </button>
-        {populateStatus && <p className="muted">{populateStatus}</p>}
+      </div>
+
+      <div className="form">
+        <h3>Operações por coleção</h3>
+        <p className="muted">
+          Escolha um set para importar (baixa as imagens e registra na base do scanner, gerando os
+          histogramas) ou deletar (remove as imagens do MinIO e os registros da base).
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            value={selectedSet}
+            onChange={(e) => setSelectedSet(e.target.value)}
+            disabled={busy}
+            style={{ minWidth: 260, padding: '0.4rem' }}
+          >
+            <option value="">Selecione um set…</option>
+            {sets.map((s) => (
+              <option key={s.set_code} value={s.set_code}>
+                {s.set_name} ({s.set_code})
+              </option>
+            ))}
+          </select>
+          <button
+            className="btn"
+            disabled={busy || !selectedSet}
+            onClick={() => void start(() => api.dataDownloadSet(selectedSet))}
+          >
+            {jobRunning && job?.type === 'download-set' ? 'Importando…' : 'Importar Imagens do Set'}
+          </button>
+          <button
+            className="btn btn--danger"
+            disabled={busy || !selectedSet}
+            onClick={() =>
+              void start(
+                () => api.dataDeleteSet(selectedSet),
+                `Isto vai APAGAR do MinIO e da base todas as cartas do set "${selectedSet}". Tem certeza?`,
+              )
+            }
+          >
+            {jobRunning && job?.type === 'delete-set' ? 'Deletando…' : 'Deletar Set'}
+          </button>
+        </div>
+      </div>
+
+      <div className="form">
+        <h3>Modelo de reconhecimento</h3>
+        <p className="muted">
+          Reconstrói o modelo do scanner (vocabulário + histogramas) a partir das imagens no MinIO,
+          e cria os hashes que faltam.
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn"
+            onClick={() => void start(api.dataRebuildScannerModel)}
+            disabled={busy}
+          >
+            {jobRunning && job?.type === 'rebuild-scanner-model' ? 'Reconstruindo…' : 'Reconstruir Modelo'}
+          </button>
+          <button className="btn" onClick={() => void onPopulateHashes()} disabled={busy}>
+            Popular Hashes do MinIO
+          </button>
+        </div>
       </div>
 
       <div className="form">
@@ -174,15 +285,26 @@ export default function DataManagementPage() {
           Remove do MinIO todas as imagens que não pertencem à sua coleção (mantém só o que você
           possui).
         </p>
-        <button className="btn btn--danger" onClick={() => void onPrune()} disabled={busy}>
-          {jobRunning && jobKind === 'prune' ? 'Removendo…' : 'Deletar Imagens Fora Coleção'}
+        <button
+          className="btn btn--danger"
+          onClick={() =>
+            void start(
+              api.dataPruneOutsideCollection,
+              'Isto vai APAGAR do MinIO todas as imagens que não são cartas da sua coleção. Tem certeza?',
+            )
+          }
+          disabled={busy}
+        >
+          {jobRunning && job?.type === 'prune-outside-collection'
+            ? 'Removendo…'
+            : 'Deletar Imagens Fora Coleção'}
         </button>
       </div>
 
       {job && (
         <div className="form">
           <h3>
-            {jobLabel} — {job.status}
+            {jobLabel(job.type)} — {job.status}
           </h3>
           {pct != null && (
             <div
@@ -204,10 +326,28 @@ export default function DataManagementPage() {
               />
             </div>
           )}
-          <p className="muted">
-            {job.processed}/{job.total} processadas · {job.succeeded} ok · {job.skipped} puladas ·{' '}
-            {job.errors.length} erros
-          </p>
+          {isDownloadAll ? (
+            <>
+              <p className="muted">
+                {job.processed}/{job.total} edições · {job.succeeded} imagens baixadas ·{' '}
+                {job.skipped} já existentes · {job.errors.length} erros
+              </p>
+              {jobRunning && (
+                <button
+                  className="btn btn--danger"
+                  onClick={() => void onCancelJob()}
+                  disabled={cancelRequested}
+                >
+                  {cancelRequested ? 'Finalizando…' : 'Finalizar download'}
+                </button>
+              )}
+            </>
+          ) : (
+            <p className="muted">
+              {job.processed}/{job.total} · {job.succeeded} ok · {job.skipped} puladas ·{' '}
+              {job.errors.length} erros
+            </p>
+          )}
           {job.message && <p className="muted">{job.message}</p>}
           {job.errors.length > 0 && (
             <details>

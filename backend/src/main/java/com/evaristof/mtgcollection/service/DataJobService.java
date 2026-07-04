@@ -49,6 +49,17 @@ public class DataJobService {
         return Optional.ofNullable(jobs.get(id));
     }
 
+    /**
+     * The most recent still-running (or queued) job, if any — used by the UI to
+     * resume showing progress after navigating away and back.
+     */
+    public Optional<DataJob> activeJob() {
+        return jobs.values().stream()
+                .filter(j -> j.getStatus() == DataJob.Status.RUNNING
+                        || j.getStatus() == DataJob.Status.PENDING)
+                .max(java.util.Comparator.comparing(DataJob::getCreatedAt));
+    }
+
     private void run(DataJob job, Consumer<DataJob> work) {
         try {
             job.setStatus(DataJob.Status.RUNNING);

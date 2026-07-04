@@ -6,10 +6,14 @@ import com.evaristof.mtgcollection.domain.MagicSet;
 import com.evaristof.mtgcollection.repository.CardImageHashRepository;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.repository.MagicSetRepository;
+import com.evaristof.mtgcollection.scryfall.ScryfallHttpClient;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardFace;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardIdentifier;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallImageUris;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+import com.google.gson.stream.JsonReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -18,12 +22,17 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.Reader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,6 +42,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -53,6 +63,18 @@ public class DataManagementService {
 
     private static final int DOWNLOAD_THREADS = 6;
     private static final long BATCH_THROTTLE_MS = 100;
+    // Scryfall bulk dataset used by the full download. "default_cards" = every
+    // (non-digital) printing, one language each — the art is language-agnostic,
+    // and keeping every printing lets the footer/OCR distinguish same-art sets
+    // (Alpha/Beta/Unlimited). See https://scryfall.com/docs/api/bulk-data
+    private static final String BULK_DATASET = "default_cards";
+    // Max concurrent image downloads + registrations during the full download.
+    // Java 21 virtual threads make each in-flight download cheap, so this is a
+    // politeness cap on Scryfall's image CDN — not a hardware/thread limit.
+    private static final int SCRYFALL_DOWNLOAD_CONCURRENCY = 24;
+
+    private static final java.lang.reflect.Type MAP_TYPE =
+            new TypeToken<Map<String, Object>>() {}.getType();
 
     private final CollectionCardRepository collectionCardRepository;
     private final CardImageHashRepository hashRepository;
@@ -61,6 +83,8 @@ public class DataManagementService {
     private final CardBatchLookupService batchLookupService;
     private final CardImageMatchService matchService;
     private final OrbArtMatchService orbArtMatchService;
+    private final ScryfallHttpClient scryfallClient;
+    private final Gson gson;
     private final HttpClient httpClient;
     private final Object dbLock = new Object();
 
@@ -71,6 +95,8 @@ public class DataManagementService {
                                  CardBatchLookupService batchLookupService,
                                  CardImageMatchService matchService,
                                  OrbArtMatchService orbArtMatchService,
+                                 ScryfallHttpClient scryfallClient,
+                                 Gson gson,
                                  HttpClient httpClient) {
         this.collectionCardRepository = collectionCardRepository;
         this.hashRepository = hashRepository;
@@ -79,6 +105,8 @@ public class DataManagementService {
         this.batchLookupService = batchLookupService;
         this.matchService = matchService;
         this.orbArtMatchService = orbArtMatchService;
+        this.scryfallClient = scryfallClient;
+        this.gson = gson;
         this.httpClient = httpClient;
     }
 
@@ -101,9 +129,303 @@ public class DataManagementService {
     public void rebuildScannerModel(DataJob job) {
         long total = hashRepository.count();
         job.setTotal((int) total);
-        job.setMessage("Reconstruindo o modelo de reconhecimento (BoVW)…");
-        orbArtMatchService.rebuild();
-        job.setMessage("Modelo reconstruído para " + total + " cartas.");
+        job.setMessage("Atualizando o modelo de reconhecimento (resumível)…");
+        // Resumable/incremental: only processes cards without a histogram yet
+        // (a resumed build or a newly downloaded edition), reusing the vocab.
+        orbArtMatchService.updateModel((phase, done, tot) -> {
+            if (tot > 0) {
+                job.setTotal(tot);
+                job.setProcessed(done);
+            }
+            job.setMessage(phase + (tot > 0 ? "… " + done + "/" + tot : "…"));
+        });
+        job.setMessage("Modelo atualizado para " + total + " cartas.");
+    }
+
+    // ------------------------------------------------------------------
+    // Per-set operations (import / delete one edition)
+    // ------------------------------------------------------------------
+
+    /**
+     * Imports every card image of a single set into MinIO + {@code card_image_hash}
+     * (idempotent, skips what's already there) and then updates the scanner model
+     * incrementally so the new cards' histograms are computed. Cheap enough to hit
+     * the Scryfall search API directly (one set, well under the rate limit).
+     */
+    public void downloadSetImages(DataJob job, String setCode) {
+        job.setMessage("Baixando imagens do set " + setCode + "…");
+        matchService.syncImagesFromScryfall(setCode);
+        job.setMessage("Atualizando o modelo de reconhecimento…");
+        orbArtMatchService.updateModel((phase, done, tot) ->
+                job.setMessage("Atualizando o modelo: " + phase + (tot > 0 ? " " + done + "/" + tot : "")));
+        long count = hashRepository.findBySetCode(setCode).size();
+        job.setMessage("Set " + setCode + " importado (" + count + " cartas).");
+    }
+
+    /**
+     * Deletes every image of a set from MinIO and its {@code card_image_hash}
+     * rows, then invalidates the scanner model so it reloads without them.
+     */
+    public void deleteSet(DataJob job, String setCode) {
+        List<CardImageHash> hashes = hashRepository.findBySetCode(setCode);
+        job.setTotal(hashes.size());
+        for (CardImageHash h : hashes) {
+            try {
+                minioStorage.deleteObject(h.getMinioPath());
+            } catch (Exception e) {
+                job.addError("MinIO " + h.getMinioPath() + ": " + e.getMessage());
+            }
+            hashRepository.delete(h);
+            job.incrementProcessed();
+            job.incrementSucceeded();
+        }
+        orbArtMatchService.invalidate();
+        job.setMessage("Set " + setCode + " removido: " + hashes.size() + " cartas.");
+    }
+
+    // ------------------------------------------------------------------
+    // Download the whole Scryfall (via bulk data)
+    // ------------------------------------------------------------------
+
+    /**
+     * Downloads the card images of every set registered in {@code magic_set}
+     * into MinIO and registers them in {@code card_image_hash}.
+     *
+     * <p>Instead of scanning the Scryfall API set-by-set (thousands of requests
+     * → HTTP 429), this pulls Scryfall's <em>bulk data</em>: one API call to
+     * find the {@code default_cards} file, one download of that file, then a
+     * streaming parse that already yields every card's set, number, name and PNG
+     * url. {@code magic_set} acts as a whitelist of which sets to keep (skips
+     * tokens/digital/promos not in the catalogue). Images are then downloaded
+     * from the CDN on a bounded pool of virtual threads. Idempotent (skips what
+     * is already present), so it resumes. Rebuilds the model at the end.
+     * job total/processed track EDITIONS seen; succeeded/skipped = IMAGES.
+     */
+    public void downloadAllScryfall(DataJob job) {
+        Set<String> whitelist = new HashSet<>();
+        for (MagicSet set : setRepository.findAll()) {
+            if (set.getSetCode() != null) {
+                whitelist.add(set.getSetCode().toLowerCase(Locale.ROOT));
+            }
+        }
+        job.setTotal(whitelist.size());
+        job.setMessage("Preparando índice do que já existe…");
+
+        // Pre-load, in ONE query each, what's already registered so the per-card
+        // check is an in-memory lookup instead of a DB query + MinIO stat.
+        Set<String> existingHashKeys = ConcurrentHashMap.newKeySet();
+        for (Object[] row : hashRepository.findAllSetCodeAndCollectorNumber()) {
+            existingHashKeys.add(hashKey((String) row[0], (String) row[1]));
+        }
+        Set<String> existingObjectKeys = ConcurrentHashMap.newKeySet();
+        existingObjectKeys.addAll(minioStorage.listAllObjectKeys());
+
+        Path bulkFile = null;
+        try {
+            job.setMessage("Localizando o catálogo bulk do Scryfall…");
+            String uri = resolveBulkDownloadUri(BULK_DATASET);
+            bulkFile = Files.createTempFile("scryfall-bulk-", ".json");
+            job.setMessage("Baixando o catálogo do Scryfall (uma vez)…");
+            downloadToFile(uri, bulkFile);
+            job.setMessage("Processando o catálogo e baixando as imagens…");
+            try (Reader reader = Files.newBufferedReader(bulkFile, StandardCharsets.UTF_8)) {
+                processBulkCards(reader, whitelist, existingHashKeys, existingObjectKeys, job);
+            }
+        } catch (Exception e) {
+            job.addError("Falha no download bulk: " + e.getMessage());
+            log.error("Bulk download failed", e);
+        } finally {
+            if (bulkFile != null) {
+                try {
+                    Files.deleteIfExists(bulkFile);
+                } catch (IOException ignored) {
+                    // best-effort temp cleanup
+                }
+            }
+        }
+
+        if (job.isCancelRequested()) {
+            job.setStatus(DataJob.Status.CANCELLED);
+            job.setMessage("Cancelado: " + job.getSucceeded() + " imagens baixadas. "
+                    + "Reconstrua o modelo quando quiser (botão \"Reconstruir Modelo\").");
+            return;
+        }
+
+        // Every whitelisted set has been handled — a few may simply have no cards
+        // in default_cards (digital/token sets), so they were never "seen" while
+        // streaming and processed stalls short of total. Snap to 100% so the UI
+        // shows 1044/1044 instead of 1042/1044 (which looked like failures).
+        job.setProcessed(job.getTotal());
+
+        job.setMessage("Imagens baixadas (" + job.getSucceeded() + "). Atualizando o modelo de reconhecimento…");
+        // Incremental: only the newly downloaded cards get histograms (or a full
+        // build the first time). Report progress in the message so it doesn't
+        // look frozen. Leaves total/processed showing the editions.
+        orbArtMatchService.updateModel((phase, done, tot) ->
+                job.setMessage("Atualizando o modelo: " + phase + (tot > 0 ? " " + done + "/" + tot : "")));
+        int errorCount = job.getErrors().size();
+        String errorNote = errorCount > 0 ? " " + errorCount + " erro(s) — veja os detalhes." : "";
+        job.setMessage("Concluído: " + job.getProcessed() + " edições, " + job.getSucceeded()
+                + " imagens novas, " + job.getSkipped() + " já existentes." + errorNote);
+    }
+
+    private static String hashKey(String setCode, String number) {
+        return setCode + "|" + number;
+    }
+
+    /** Resolves the download URL of a Scryfall bulk-data file (1 API call). */
+    private String resolveBulkDownloadUri(String type) throws IOException, InterruptedException {
+        String json = scryfallClient.get("/bulk-data");
+        Map<String, Object> resp = gson.fromJson(json, MAP_TYPE);
+        Object dataObj = resp == null ? null : resp.get("data");
+        if (dataObj instanceof List<?> data) {
+            for (Object o : data) {
+                if (o instanceof Map<?, ?> entry && type.equals(entry.get("type"))) {
+                    Object uri = entry.get("download_uri");
+                    if (uri != null) {
+                        return uri.toString();
+                    }
+                }
+            }
+        }
+        throw new IOException("bulk-data '" + type + "' não encontrado na resposta do Scryfall");
+    }
+
+    /** Streams a (large) file to {@code dest} on disk. */
+    private void downloadToFile(String uri, Path dest) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(uri))
+                .header("User-Agent", "MTGCollection/0.1")
+                .timeout(Duration.ofMinutes(15))
+                .GET()
+                .build();
+        HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(dest));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("download do bulk falhou: HTTP " + response.statusCode());
+        }
+    }
+
+    /**
+     * Streams the bulk-data JSON array and, for each card whose set is in the
+     * whitelist, dispatches an image download + registration to a bounded pool
+     * of virtual threads. Package-private so it can be unit-tested with a small
+     * in-memory array (no network). {@code processed} counts distinct sets seen.
+     */
+    void processBulkCards(Reader bulkJson, Set<String> whitelist,
+                          Set<String> existingHashKeys, Set<String> existingObjectKeys, DataJob job) {
+        Semaphore downloadPermits = new Semaphore(SCRYFALL_DOWNLOAD_CONCURRENCY);
+        ExecutorService cardPool = Executors.newVirtualThreadPerTaskExecutor();
+        Set<String> setsSeen = ConcurrentHashMap.newKeySet();
+        try (JsonReader reader = new JsonReader(bulkJson)) {
+            reader.beginArray();
+            while (reader.hasNext()) {
+                if (job.isCancelRequested()) {
+                    break;
+                }
+                Map<String, Object> card = gson.fromJson(reader, MAP_TYPE);
+                Object setObj = card.get("set");
+                if (!(setObj instanceof String s)) {
+                    continue;
+                }
+                String setCode = s.toLowerCase(Locale.ROOT);
+                if (!whitelist.contains(setCode)) {
+                    continue; // token / digital / promo set not in the catalogue
+                }
+                if (setsSeen.add(setCode)) {
+                    job.incrementProcessed();
+                }
+                // Backpressure: block the parser until a download slot frees, so
+                // we never hold more than the permit count of card objects live.
+                downloadPermits.acquire();
+                cardPool.submit(() -> {
+                    try {
+                        downloadBulkCard(card, setCode, job, existingHashKeys, existingObjectKeys);
+                    } catch (Exception e) {
+                        job.addError(setCode + ": " + e.getMessage());
+                    } finally {
+                        downloadPermits.release();
+                    }
+                });
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            job.addError("Processamento interrompido");
+        } catch (Exception e) {
+            job.addError("Erro ao processar o catálogo bulk: " + e.getMessage());
+            log.error("Bulk parse failed", e);
+        } finally {
+            cardPool.shutdown();
+            try {
+                cardPool.awaitTermination(6, TimeUnit.HOURS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    /** Downloads and registers one card described by a bulk-data card object. */
+    private void downloadBulkCard(Map<String, Object> card, String setCode, DataJob job,
+                                  Set<String> existingHashKeys, Set<String> existingObjectKeys)
+            throws IOException {
+        if (job.isCancelRequested()) {
+            return;
+        }
+        String name = (String) card.get("name");
+        String number = (String) card.get("collector_number");
+        if (number == null) {
+            return;
+        }
+        String pngUrl = pngFromMap(card);
+        if (pngUrl == null) {
+            return; // some layouts have no single PNG — nothing to store
+        }
+        Object setNameObj = card.get("set_name");
+        String setName = setNameObj instanceof String sn ? sn : setCode;
+        String objectKey = minioStorage.objectKey(setName, setCode, number, name != null ? name : "Unknown");
+
+        boolean hasHash = existingHashKeys.contains(hashKey(setCode, number));
+        boolean existsInMinio = existingObjectKeys.contains(objectKey);
+        if (existsInMinio && hasHash) {
+            job.incrementSkipped();
+            return;
+        }
+        byte[] bytes = existsInMinio ? minioStorage.download(objectKey) : downloadImage(pngUrl);
+        if (!existsInMinio) {
+            minioStorage.upload(objectKey, bytes);
+            existingObjectKeys.add(objectKey);
+        }
+        if (!hasHash) {
+            BufferedImage image = ImageIO.read(new ByteArrayInputStream(bytes));
+            if (image == null) {
+                throw new IOException("imagem não pôde ser decodificada");
+            }
+            // deferHistogram=true: the BoVW histogram is globally locked on the
+            // OpenCV lock and recomputed for every card by the final rebuild, so
+            // skip it here. No dbLock: the unique (set, number) constraint guards
+            // against duplicates.
+            matchService.registerHashIfAbsent(setCode, number,
+                    name != null ? name : "Unknown", objectKey, image, true);
+            existingHashKeys.add(hashKey(setCode, number));
+        }
+        job.incrementSucceeded();
+    }
+
+    private String pngFromMap(Map<String, Object> cardMap) {
+        @SuppressWarnings("unchecked")
+        Map<String, String> imageUris = (Map<String, String>) cardMap.get("image_uris");
+        if (imageUris != null && imageUris.get("png") != null) {
+            return imageUris.get("png");
+        }
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> faces = (List<Map<String, Object>>) cardMap.get("card_faces");
+        if (faces != null && !faces.isEmpty()) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> faceUris = (Map<String, String>) faces.get(0).get("image_uris");
+            if (faceUris != null && faceUris.get("png") != null) {
+                return faceUris.get("png");
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------
