@@ -101,6 +101,15 @@
             <version>4.9.0-0</version>
         </dependency>
 
+        <!-- metadata-extractor - reads EXIF orientation from phone photos, which
+             ImageIO ignores. Needed so the multi-card splitter sees the image
+             the right way up before detecting card rectangles. -->
+        <dependency>
+            <groupId>com.drewnoakes</groupId>
+            <artifactId>metadata-extractor</artifactId>
+            <version>2.19.0</version>
+        </dependency>
+
         <!-- FuzzyWuzzy - pure-Java fuzzy string matching (no native bindings),
              used to correct OCR'd card names/set codes against the Scryfall
              name catalog. -->

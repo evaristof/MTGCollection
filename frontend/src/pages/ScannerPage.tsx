@@ -1,13 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
-import type { MagicSet, ScannerMatchResult } from '../types/mtg'
+import type { MagicSet, ScannerMatchResult, ScannerSplitResult } from '../types/mtg'
 
 type RowStatus = 'scanning' | 'matched' | 'notfound' | 'error'
+
+// Revoke only blob: object URLs — bulk rows use base64 data: URLs (crops), for
+// which revokeObjectURL is a no-op but we avoid calling it needlessly.
+const revokePreview = (url: string) => {
+  if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+}
+
+// Turn a base64 data URL (a crop returned by /split) back into a File so it can
+// be POSTed to the normal /match endpoint.
+const dataUrlToFile = async (dataUrl: string, name: string): Promise<File> => {
+  const blob = await (await fetch(dataUrl)).blob()
+  return new File([blob], name, { type: blob.type || 'image/png' })
+}
+
+// "12.4s" under a minute, "1m 23s" above.
+const formatDuration = (ms: number) => {
+  const s = ms / 1000
+  if (s < 60) return `${s.toFixed(1)}s`
+  const m = Math.floor(s / 60)
+  return `${m}m ${Math.round(s % 60)}s`
+}
 
 interface ScanRow {
   id: string
   fileName: string
-  previewUrl: string // objectURL of the uploaded photo — provisional, lives in memory
+  previewUrl: string // photo for the hover preview: object URL (single) or crop data URL (bulk)
   status: RowStatus
   confidence?: number
   scanError?: string
@@ -32,12 +53,25 @@ const uid = () =>
 
 export default function ScannerPage() {
   const [files, setFiles] = useState<File[]>([])
+  const [bulkFiles, setBulkFiles] = useState<File[]>([])
   const [rows, setRows] = useState<ScanRow[]>([])
   const [sets, setSets] = useState<MagicSet[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const bulkInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Elapsed-time counter per section: ticks live while a scan runs, then shows
+  // the total once it finishes.
+  const [runningKind, setRunningKind] = useState<'single' | 'bulk' | null>(null)
+  const [elapsed, setElapsed] = useState<{ single: number | null; bulk: number | null }>({
+    single: null,
+    bulk: null,
+  })
+  const timerStartRef = useRef(0)
+  const timerIntervalRef = useRef<number | null>(null)
+  const [, forceTick] = useState(0)
 
   // Keep a live ref of preview URLs so we can revoke them all on unmount.
   const rowsRef = useRef<ScanRow[]>([])
@@ -52,9 +86,28 @@ export default function ScannerPage() {
       }
     })()
     return () => {
-      rowsRef.current.forEach((r) => URL.revokeObjectURL(r.previewUrl))
+      rowsRef.current.forEach((r) => revokePreview(r.previewUrl))
+      if (timerIntervalRef.current != null) window.clearInterval(timerIntervalRef.current)
     }
   }, [])
+
+  const startTimer = (kind: 'single' | 'bulk') => {
+    timerStartRef.current = performance.now()
+    setRunningKind(kind)
+    setElapsed((p) => ({ ...p, [kind]: null }))
+    if (timerIntervalRef.current != null) window.clearInterval(timerIntervalRef.current)
+    // Re-render ~10x/s so the live counter ticks while scanning.
+    timerIntervalRef.current = window.setInterval(() => forceTick((t) => t + 1), 100)
+  }
+
+  const stopTimer = (kind: 'single' | 'bulk') => {
+    if (timerIntervalRef.current != null) {
+      window.clearInterval(timerIntervalRef.current)
+      timerIntervalRef.current = null
+    }
+    setElapsed((p) => ({ ...p, [kind]: performance.now() - timerStartRef.current }))
+    setRunningKind(null)
+  }
 
   const patchRow = (id: string, patch: Partial<ScanRow>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
@@ -71,6 +124,7 @@ export default function ScannerPage() {
     }
     setBusy(true)
     setError(null)
+    startTimer('single')
 
     // Create a row per image up front (status "scanning"), then match them ONE
     // AT A TIME. The backend serializes the ORB match under a lock anyway, and
@@ -116,9 +170,88 @@ export default function ScannerPage() {
       }
     }
 
+    stopTimer('single')
     setBusy(false)
     setFiles([])
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const onBulkFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setBulkFiles(Array.from(e.target.files ?? []))
+    setError(null)
+  }
+
+  // Bulk scan: each selected photo contains MANY cards. Two phases so the user
+  // sees progress: (1) SPLIT the photo — every detected card appears at once as
+  // a row with its crop, status "scanning"; (2) MATCH each crop one at a time
+  // through the normal single-card endpoint, filling each row in as it resolves.
+  const onScanBulk = async () => {
+    if (bulkFiles.length === 0) {
+      setError('Selecione ao menos uma foto com várias cartas.')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    startTimer('bulk')
+
+    // One photo at a time: the backend runs OpenCV (not thread-safe) per crop.
+    for (const file of bulkFiles) {
+      try {
+        const split: ScannerSplitResult = await api.scannerSplit(file)
+
+        // Phase 1: show a row per detected crop immediately.
+        const created = split.crops.map((c) => ({
+          crop: c,
+          row: {
+            id: uid(),
+            fileName: `${file.name} · carta ${c.index + 1}`,
+            previewUrl: c.crop_image, // base64 data URL of the crop
+            status: 'scanning' as RowStatus,
+            name: '',
+            set: '',
+            number: '',
+            language: '',
+            quantity: 1,
+            foil: false,
+            localizacao: '',
+          } satisfies ScanRow,
+        }))
+        setRows((prev) => [...prev, ...created.map((x) => x.row)])
+
+        // Phase 2: match each crop sequentially, updating its row as it resolves.
+        for (const { crop, row } of created) {
+          try {
+            const cropFile = await dataUrlToFile(crop.crop_image, `crop_${crop.index}.png`)
+            const res: ScannerMatchResult = await api.scannerMatch(cropFile)
+            if (res.matched && res.card_name) {
+              patchRow(row.id, {
+                status: 'matched',
+                confidence: res.confidence,
+                name: res.card_name,
+                set: res.set_code ?? '',
+                number: res.collector_number ?? '',
+              })
+            } else {
+              patchRow(row.id, { status: 'notfound' })
+            }
+          } catch (err) {
+            patchRow(row.id, {
+              status: 'error',
+              scanError: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+      } catch (err) {
+        setError(
+          `Falha ao escanear ${file.name}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    }
+
+    stopTimer('bulk')
+    setBusy(false)
+    setBulkFiles([])
+    if (bulkInputRef.current) bulkInputRef.current.value = ''
   }
 
   const onAddRow = async (id: string) => {
@@ -154,17 +287,30 @@ export default function ScannerPage() {
   const onRemoveRow = (id: string) => {
     setRows((prev) => {
       const row = prev.find((r) => r.id === id)
-      if (row) URL.revokeObjectURL(row.previewUrl)
+      if (row) revokePreview(row.previewUrl)
       return prev.filter((r) => r.id !== id)
     })
   }
 
   const onClearAll = () => {
-    rows.forEach((r) => URL.revokeObjectURL(r.previewUrl))
+    rows.forEach((r) => revokePreview(r.previewUrl))
     setRows([])
   }
 
   const hoveredRow = hovered ? rows.find((r) => r.id === hovered) : null
+
+  // Live counter while a scan runs, total once it finishes.
+  const renderTimer = (kind: 'single' | 'bulk') => {
+    if (runningKind === kind) {
+      const live = performance.now() - timerStartRef.current
+      return <span className="muted">⏱ {formatDuration(live)}…</span>
+    }
+    const total = elapsed[kind]
+    if (total != null) {
+      return <span className="muted">⏱ Concluído em {formatDuration(total)}</span>
+    }
+    return null
+  }
 
   return (
     <section className="page">
@@ -203,6 +349,39 @@ export default function ScannerPage() {
               Limpar tudo
             </button>
           )}
+          <span style={{ alignSelf: 'center' }}>{renderTimer('single')}</span>
+        </div>
+      </div>
+
+      <div className="form">
+        <h3>Escanear em massa</h3>
+        <p className="muted">
+          Envie fotos em que <strong>cada foto tem várias cartas</strong> (ex.: uma página de fichário).
+          O sistema separa cada carta e tenta reconhecê-la individualmente — cada carta detectada vira
+          uma linha editável abaixo. A detecção é aproximada: revise, ajuste ou remova as linhas.
+        </p>
+        <div className="form__grid">
+          <label>
+            <span>Foto(s) com várias cartas</span>
+            <input
+              ref={bulkInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              multiple
+              onChange={onBulkFileChange}
+            />
+          </label>
+        </div>
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button
+            className="btn"
+            onClick={() => void onScanBulk()}
+            disabled={busy || bulkFiles.length === 0}
+          >
+            {busy ? 'Processando…' : `Escanear em massa${bulkFiles.length ? ` (${bulkFiles.length})` : ''}`}
+          </button>
+          <span style={{ alignSelf: 'center' }}>{renderTimer('bulk')}</span>
         </div>
       </div>
 
@@ -226,6 +405,7 @@ export default function ScannerPage() {
                 <th>Localização</th>
                 <th>Conf.</th>
                 <th>Ações</th>
+                <th>Arquivo</th>
               </tr>
             </thead>
             <tbody>
@@ -331,6 +511,9 @@ export default function ScannerPage() {
                     {row.status === 'error' && row.scanError && (
                       <div className="error" style={{ marginTop: 4 }}>Falha no scan: {row.scanError}</div>
                     )}
+                  </td>
+                  <td className="muted" style={{ fontSize: '0.85em', maxWidth: 180, wordBreak: 'break-word' }} title={row.fileName}>
+                    {row.fileName}
                   </td>
                 </tr>
               ))}
