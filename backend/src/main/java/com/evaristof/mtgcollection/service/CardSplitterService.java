@@ -197,7 +197,7 @@ public class CardSplitterService {
                     candidates.add(new Scored(box, rectArea));
                 }
             }
-            return nonMaxSuppress(candidates);
+            return fillGridHoles(nonMaxSuppress(candidates), sourceBgr.cols(), sourceBgr.rows());
         } finally {
             small.release();
             gray.release();
@@ -240,6 +240,84 @@ public class CardSplitterService {
             }
         }
         return kept;
+    }
+
+    /**
+     * Cards on a binder page sit in a regular grid, so a card whose border the
+     * edge detector missed (glare, dark-on-dark) leaves a HOLE in an otherwise
+     * detected grid. This clusters the detected boxes into columns (by centre x)
+     * and rows (by centre y) and adds a synthetic box at any column×row
+     * intersection that no real box covers — recovering the missed cards from the
+     * geometry of the found ones. It only fills *within* the detected span (never
+     * extrapolates past it), so a fully detected grid gains nothing and there's
+     * no regression. Bounded to sane grids to avoid inventing cards from noise.
+     */
+    private List<Rect> fillGridHoles(List<Rect> boxes, int fullW, int fullH) {
+        if (boxes.size() < 4) {
+            return boxes; // too few to trust a grid
+        }
+        int medW = medianInt(boxes.stream().map(b -> b.width).toList());
+        int medH = medianInt(boxes.stream().map(b -> b.height).toList());
+        if (medW <= 0 || medH <= 0) {
+            return boxes;
+        }
+        List<Double> cols = cluster1D(boxes.stream().map(b -> b.x + b.width / 2.0).toList(), medW * 0.5);
+        List<Double> rows = cluster1D(boxes.stream().map(b -> b.y + b.height / 2.0).toList(), medH * 0.5);
+        // Need a real 2-D grid, and don't trust implausibly large ones (noise).
+        if (cols.size() < 2 || rows.size() < 2 || cols.size() * rows.size() > 20) {
+            return boxes;
+        }
+        List<Rect> result = new ArrayList<>(boxes);
+        for (double cx : cols) {
+            for (double cy : rows) {
+                boolean covered = boxes.stream().anyMatch(b ->
+                        Math.abs(b.x + b.width / 2.0 - cx) < medW * 0.5
+                                && Math.abs(b.y + b.height / 2.0 - cy) < medH * 0.5);
+                if (covered) {
+                    continue;
+                }
+                int x = (int) Math.round(cx - medW / 2.0);
+                int y = (int) Math.round(cy - medH / 2.0);
+                x = Math.max(0, Math.min(x, fullW - 1));
+                y = Math.max(0, Math.min(y, fullH - 1));
+                int w = Math.min(medW, fullW - x);
+                int h = Math.min(medH, fullH - y);
+                if (w > 0 && h > 0) {
+                    result.add(new Rect(x, y, w, h));
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Groups sorted 1-D values into clusters whose members are within tol; returns cluster means. */
+    private static List<Double> cluster1D(List<Double> values, double tol) {
+        List<Double> sorted = new ArrayList<>(values);
+        sorted.sort(Double::compareTo);
+        List<Double> centers = new ArrayList<>();
+        double sum = 0;
+        int count = 0;
+        double last = Double.NaN;
+        for (double v : sorted) {
+            if (count > 0 && v - last > tol) {
+                centers.add(sum / count);
+                sum = 0;
+                count = 0;
+            }
+            sum += v;
+            count++;
+            last = v;
+        }
+        if (count > 0) {
+            centers.add(sum / count);
+        }
+        return centers;
+    }
+
+    private static int medianInt(List<Integer> values) {
+        List<Integer> sorted = new ArrayList<>(values);
+        sorted.sort(Integer::compareTo);
+        return sorted.isEmpty() ? 0 : sorted.get(sorted.size() / 2);
     }
 
     /** Intersection area as a fraction of the smaller box's area (0..1). */
