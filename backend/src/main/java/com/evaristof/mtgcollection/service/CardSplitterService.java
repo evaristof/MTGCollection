@@ -134,23 +134,33 @@ public class CardSplitterService {
                 (double) SEARCH_MAX_DIM / Math.max(sourceBgr.rows(), sourceBgr.cols()));
         Mat small = new Mat();
         Mat gray = new Mat();
+        Mat equalized = new Mat();
         Mat blurred = new Mat();
+        Mat scratch = new Mat();
         Mat mask = new Mat();
         Mat opened = new Mat();
         Mat hierarchy = new Mat();
         Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(SEP_KERNEL, SEP_KERNEL));
+        org.opencv.imgproc.CLAHE clahe = Imgproc.createCLAHE(2.0, new Size(8, 8));
         List<MatOfPoint> contours = new ArrayList<>();
         try {
             Imgproc.resize(sourceBgr, small, new Size(), scale, scale, Imgproc.INTER_AREA);
             Imgproc.cvtColor(small, gray, Imgproc.COLOR_BGR2GRAY);
-            Imgproc.bilateralFilter(gray, blurred, 9, 75, 75);
-            // Cards here often have dark frames (old blue cards) that are as dark
-            // as the binder pocket, so a brightness threshold can't isolate them.
-            // Their EDGES are strong though: Canny the card outlines, then CLOSE
-            // (dilate→erode) to bridge gaps where glare/foil breaks the border so
-            // each card outline becomes one closed loop. RETR_EXTERNAL keeps only
-            // the outermost contour per card (drops internal art/text boxes).
-            Imgproc.Canny(blurred, mask, 40, 120);
+            // Normalise local contrast (CLAHE) so the SAME edge detector works
+            // whether the cards are light-on-light (white cards, white binder) or
+            // dark-on-dark (black cards, black binder + glare) — the two extremes
+            // in the sample set. Without this, fixed Canny thresholds miss one end.
+            clahe.apply(gray, equalized);
+            Imgproc.bilateralFilter(equalized, blurred, 9, 75, 75);
+            // Cards here often have dark frames as dark as the binder pocket, so a
+            // brightness threshold can't isolate them. Their EDGES are strong
+            // though: Canny the card outlines, then CLOSE (dilate→erode) to bridge
+            // gaps where glare/foil breaks the border so each outline becomes one
+            // closed loop. Canny thresholds come from each photo's own Otsu level
+            // (auto-Canny) instead of fixed constants, adapting to its contrast.
+            double otsu = Imgproc.threshold(blurred, scratch, 0, 255,
+                    Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+            Imgproc.Canny(blurred, mask, 0.5 * otsu, otsu);
             Imgproc.morphologyEx(mask, opened, Imgproc.MORPH_CLOSE, kernel);
             if (debugMaskSink != null) {
                 debugMaskSink.accept(opened.clone());
@@ -191,11 +201,14 @@ public class CardSplitterService {
         } finally {
             small.release();
             gray.release();
+            equalized.release();
             blurred.release();
+            scratch.release();
             mask.release();
             opened.release();
             hierarchy.release();
             kernel.release();
+            clahe.collectGarbage();
             for (MatOfPoint c : contours) {
                 c.release();
             }
