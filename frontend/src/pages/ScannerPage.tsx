@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { MagicSet, ScannerMatchResult, ScannerSplitResult } from '../types/mtg'
 
-type RowStatus = 'scanning' | 'matched' | 'notfound' | 'error'
+type RowStatus = 'scanning' | 'matched' | 'notfound' | 'error' | 'manual'
 
 // Revoke only blob: object URLs — bulk rows use base64 data: URLs (crops), for
 // which revokeObjectURL is a no-op but we avoid calling it needlessly.
@@ -297,6 +297,27 @@ export default function ScannerPage() {
     setRows([])
   }
 
+  // Add a blank editable row for a card the scanner didn't detect, so it can be
+  // filled in by hand and added to the collection like any other row.
+  const onAddManualRow = () => {
+    setRows((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        fileName: '(manual)',
+        previewUrl: '', // no photo — it wasn't scanned
+        status: 'manual',
+        name: '',
+        set: '',
+        number: '',
+        language: '',
+        quantity: 1,
+        foil: false,
+        localizacao: '',
+      },
+    ])
+  }
+
   const hoveredRow = hovered ? rows.find((r) => r.id === hovered) : null
 
   // Live counter while a scan runs, total once it finishes.
@@ -385,13 +406,19 @@ export default function ScannerPage() {
         </div>
       </div>
 
-      {rows.length > 0 && (
-        <div className="form">
+      <div className="form">
           <h3>Cartas escaneadas ({rows.length})</h3>
           <p className="muted">
             Passe o mouse sobre a linha para ver a foto escaneada (ela existe só provisoriamente).
-            Ajuste os campos e clique em <strong>Adicionar à coleção</strong>.
+            Ajuste os campos e clique em <strong>Adicionar à coleção</strong>. Se alguma carta não
+            foi detectada, use <strong>Adicionar linha manual</strong> e preencha os campos à mão.
           </p>
+          <div style={{ marginBottom: '0.75rem' }}>
+            <button className="btn btn--sm" onClick={onAddManualRow}>
+              ＋ Adicionar linha manual
+            </button>
+          </div>
+          {rows.length > 0 && (
           <table className="table">
             <thead>
               <tr>
@@ -484,7 +511,7 @@ export default function ScannerPage() {
                       ? `${(row.confidence * 100).toFixed(0)}%`
                       : row.status === 'scanning'
                         ? '…'
-                        : row.status === 'notfound'
+                        : row.status === 'notfound' || row.status === 'manual'
                           ? '—'
                           : '⚠'}
                   </td>
@@ -519,11 +546,11 @@ export default function ScannerPage() {
               ))}
             </tbody>
           </table>
+          )}
         </div>
-      )}
 
-      {/* Floating preview of the scanned photo for the hovered row. */}
-      {hoveredRow && (
+      {/* Floating preview of the scanned photo for the hovered row (manual rows have none). */}
+      {hoveredRow && hoveredRow.previewUrl && (
         <img
           src={hoveredRow.previewUrl}
           alt="Carta escaneada"
