@@ -107,6 +107,25 @@ export interface ScannerMatchResult {
 }
 
 /**
+ * One detected card crop from POST /api/scanner/split: its position in the photo
+ * and the crop image as a base64 data URL (no match yet — that's done per-crop
+ * afterwards through /match).
+ */
+export interface ScannerSplitCrop {
+  index: number
+  crop_image: string
+}
+
+/**
+ * Response from POST /api/scanner/split — a photo with many cards divided into
+ * one crop per detected card.
+ */
+export interface ScannerSplitResult {
+  count: number
+  crops: ScannerSplitCrop[]
+}
+
+/**
  * Aggregate counts shown on the Magic Data Management screen
  * (GET /api/data-management/stats).
  */

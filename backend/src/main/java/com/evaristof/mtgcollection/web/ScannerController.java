@@ -2,6 +2,8 @@ package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.CardImageHash;
 import com.evaristof.mtgcollection.service.CardImageMatchService;
+import com.evaristof.mtgcollection.service.CardSplitterService;
+import com.evaristof.mtgcollection.service.ImageOrientationUtil;
 import com.evaristof.mtgcollection.service.MinioStorageService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
@@ -16,7 +18,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -25,11 +31,14 @@ public class ScannerController {
 
     private final CardImageMatchService matchService;
     private final MinioStorageService minioStorage;
+    private final CardSplitterService cardSplitter;
 
     public ScannerController(CardImageMatchService matchService,
-                             MinioStorageService minioStorage) {
+                             MinioStorageService minioStorage,
+                             CardSplitterService cardSplitter) {
         this.matchService = matchService;
         this.minioStorage = minioStorage;
+        this.cardSplitter = cardSplitter;
     }
 
     @PostMapping("/match")
@@ -69,6 +78,48 @@ public class ScannerController {
                     "matched", false,
                     "error", msg));
         }
+    }
+
+    /**
+     * Bulk scan, phase 1: a photo with MANY cards (e.g. a binder page) is split
+     * into one crop per card ({@link CardSplitterService}). Returns only the
+     * crops (as base64 data URLs) — NOT the matches. The client shows a row per
+     * crop immediately, then matches each crop through the normal {@code /match}
+     * endpoint one at a time, so the user sees the scan fill in progressively.
+     */
+    @PostMapping("/split")
+    public ResponseEntity<Map<String, Object>> split(@RequestParam("image") MultipartFile image) {
+        try {
+            // Honour EXIF orientation so the split sees upright cards.
+            BufferedImage buffered = ImageOrientationUtil.readUpright(image.getBytes());
+            if (buffered == null) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "Could not decode image"));
+            }
+
+            List<BufferedImage> crops = cardSplitter.splitCards(buffered);
+            List<Map<String, Object>> out = new ArrayList<>(crops.size());
+            for (int i = 0; i < crops.size(); i++) {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("index", i);
+                entry.put("crop_image", toDataUrl(crops.get(i)));
+                out.add(entry);
+            }
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("count", out.size());
+            body.put("crops", out);
+            return ResponseEntity.ok(body);
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getName();
+            return ResponseEntity.internalServerError().body(Map.of("error", msg));
+        }
+    }
+
+    private static String toDataUrl(BufferedImage img) throws java.io.IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(img, "png", out);
+        return "data:image/png;base64," + Base64.getEncoder().encodeToString(out.toByteArray());
     }
 
     // Diagnostic endpoint — given a photo and the known-correct set/number,

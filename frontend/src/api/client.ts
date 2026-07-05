@@ -7,6 +7,7 @@ import type {
   MagicSet,
   PriceMoversResponse,
   ScannerMatchResult,
+  ScannerSplitResult,
   ScryfallSet,
 } from '../types/mtg'
 
@@ -246,6 +247,19 @@ export const api = {
       (res) => {
         if (!res.ok) throw new Error(`Scanner match failed: ${res.status}`)
         return res.json() as Promise<ScannerMatchResult>
+      },
+    )
+  },
+
+  // Bulk scan phase 1: one photo with many cards → split into per-card crops.
+  // (Each crop is then matched individually via scannerMatch.)
+  scannerSplit: (file: File): Promise<ScannerSplitResult> => {
+    const form = new FormData()
+    form.append('image', file)
+    return fetch(`${API_BASE_URL}/api/scanner/split`, { method: 'POST', body: form }).then(
+      (res) => {
+        if (!res.ok) throw new Error(`Bulk split failed: ${res.status}`)
+        return res.json() as Promise<ScannerSplitResult>
       },
     )
   },
