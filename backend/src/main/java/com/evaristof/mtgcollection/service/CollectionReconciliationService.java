@@ -109,7 +109,9 @@ public class CollectionReconciliationService {
 
     @Transactional(readOnly = true)
     public ReconciliationResult reconcile(byte[] xlsxBytes) {
-        Map<String, MagicSet> setsByName = indexSetsByName();
+        List<MagicSet> allSets = setRepository.findAll();
+        Map<String, MagicSet> setsByName = indexBy(allSets, MagicSet::getSetName);
+        Map<String, MagicSet> setsByCode = indexBy(allSets, MagicSet::getSetCode);
         Map<Key, Agg> excel = new LinkedHashMap<>();
         List<String> ignored = new ArrayList<>();
         int sheetRows = 0;
@@ -205,8 +207,12 @@ public class CollectionReconciliationService {
             Agg agg = mine.computeIfAbsent(key, k -> new Agg());
             agg.cardName = firstNonBlank(agg.cardName, card.getCardName());
             agg.setCode = agg.setCode != null ? agg.setCode : card.getSetCode();
+            // Rótulo do set: o nome de verdade quando conhecemos o código —
+            // usar o código aqui era o motivo de "só na base" mostrar só a sigla.
+            MagicSet ourSet = setsByCode.get(CollectionSheetParser.normalize(card.getSetCode()));
             agg.setName = firstNonBlank(agg.setName,
-                    card.getSetCode() != null ? card.getSetCode() : card.getSetNameRaw());
+                    ourSet != null ? ourSet.getSetName()
+                            : firstNonBlank(card.getSetNameRaw(), card.getSetCode()));
             agg.cardNumber = firstNonBlank(agg.cardNumber, card.getCardNumber());
             agg.foil = card.isFoil();
             agg.language = LanguageNormalizer.canonical(card.getLanguage());
@@ -305,19 +311,22 @@ public class CollectionReconciliationService {
         return "?" + CollectionSheetParser.normalize(setNameRaw);
     }
 
+    /** First of the two values that isn't null/blank (trimmed), else the first. */
     private static String firstNonBlank(String current, String candidate) {
-        if (current != null && !current.isBlank()) return current;
+        if (current != null && !current.isBlank()) return current.trim();
         return candidate == null || candidate.isBlank() ? current : candidate.trim();
     }
 
-    private Map<String, MagicSet> indexSetsByName() {
-        List<MagicSet> all = setRepository.findAll();
-        Map<String, MagicSet> byName = new HashMap<>(all.size() * 2);
-        for (MagicSet set : all) {
-            if (set.getSetName() != null) {
-                byName.put(CollectionSheetParser.normalize(set.getSetName()), set);
+    /** Sets indexed by a normalised attribute (name or code) for lookups. */
+    private static Map<String, MagicSet> indexBy(List<MagicSet> sets,
+                                                 java.util.function.Function<MagicSet, String> attribute) {
+        Map<String, MagicSet> index = new HashMap<>(sets.size() * 2);
+        for (MagicSet set : sets) {
+            String value = attribute.apply(set);
+            if (value != null && !value.isBlank()) {
+                index.put(CollectionSheetParser.normalize(value), set);
             }
         }
-        return byName;
+        return index;
     }
 }

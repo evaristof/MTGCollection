@@ -128,6 +128,10 @@ class CollectionReconciliationServiceTest {
             assertThat(d.cardName()).isEqualTo("Counterspell");
             assertThat(d.collectionQuantity()).isEqualTo(4);
             assertThat(d.cardIds()).containsExactly(12L);
+            // A tela mostra "nome - sigla": as linhas que vêm só da base
+            // também precisam trazer o NOME do set, não apenas o código.
+            assertThat(d.setName()).isEqualTo("Onslaught");
+            assertThat(d.setCode()).isEqualTo("ons");
         });
         assertThat(result.quantityMismatch()).singleElement().satisfies(d -> {
             assertThat(d.cardName()).isEqualTo("Complicate");

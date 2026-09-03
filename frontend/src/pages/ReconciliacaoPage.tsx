@@ -19,6 +19,14 @@ const rowKey = (d: ReconciliationDiffRow) =>
 
 const foilLabel = (foil: boolean) => (foil ? '✦' : '—')
 
+/** "Onslaught - ONS" — cai para o que existir quando falta nome ou código. */
+const setLabel = (d: ReconciliationDiffRow) => {
+  const code = d.set_code?.trim()
+  const name = d.set_name?.trim()
+  if (name && code) return `${name} - ${code.toUpperCase()}`
+  return name || code?.toUpperCase() || '-'
+}
+
 export default function ReconciliacaoPage() {
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<ReconciliationResult | null>(null)
@@ -202,7 +210,7 @@ export default function ReconciliacaoPage() {
           </CardImageTooltip>
         )}
       </td>
-      <td title={d.set_code ?? undefined}>{d.set_name ?? d.set_code ?? '-'}</td>
+      <td>{setLabel(d)}</td>
       <td>{d.card_number ?? '-'}</td>
       <td style={{ textAlign: 'center' }}>{foilLabel(d.foil)}</td>
       <td>{d.language || '-'}</td>
