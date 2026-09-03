@@ -24,6 +24,10 @@ interface SetComboProps {
  * A native <select> can't render different text for collapsed vs expanded
  * states nor offer typeahead search, which is why we roll our own lightweight
  * dropdown here.
+ *
+ * Teclado: com a lista aberta, as setas navegam e tanto Enter quanto Tab
+ * escolhem o set em destaque — o Tab ainda segue para o próximo campo, para
+ * cadastrar em lote sem tirar a mão do teclado.
  */
 export function SetCombo({
   value,
@@ -143,6 +147,23 @@ export function SetCombo({
         e.preventDefault()
         pick(filteredItems[activeIdx]?.code)
         break
+      case 'Tab': {
+        // Igual ao Enter, mas sem preventDefault: quem leva o foco ao campo
+        // seguinte é o próprio Tab.
+        //
+        // O fechamento do popover fica para o tick seguinte de propósito: a
+        // caixa de busca vive DENTRO dele, e o React aplica a mudança de
+        // estado antes de o navegador executar a ação padrão da tecla. Se o
+        // popover sumisse agora, o elemento focado seria removido antes da
+        // hora e o foco cairia no body — o Tab então iria para o começo da
+        // página em vez do próximo campo do formulário.
+        const item = filteredItems[activeIdx]
+        if (!e.shiftKey && item !== undefined) {
+          onChange(item.code)
+        }
+        window.setTimeout(() => setOpen(false), 0)
+        break
+      }
       default:
         break
     }
