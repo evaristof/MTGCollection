@@ -548,6 +548,22 @@ export default function CardsPage() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              // A resposta vem como attachment, então o navegador baixa o
+              // arquivo sem tirar o usuário da tela.
+              window.location.href = api.exportCollectionUrl()
+            }}
+            disabled={viewingDump}
+            title={
+              viewingDump
+                ? 'Selecione "— atual —" para exportar a coleção'
+                : 'Baixa a coleção inteira no mesmo formato do "Importar coleção"'
+            }
+          >
+            Exportar coleção
+          </button>
+          <button
+            type="button"
             onClick={() => void onCreateDump()}
             disabled={dumpBusy || viewingDump}
             title={

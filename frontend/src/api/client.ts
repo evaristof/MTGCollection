@@ -250,6 +250,13 @@ export const api = {
   importDownloadUrl: (jobId: string) =>
     `${API_BASE_URL}/api/collection/import/${encodeURIComponent(jobId)}/download`,
 
+  /**
+   * Download da coleção inteira como planilha, no mesmo layout que o
+   * "Importar coleção" lê (o navegador baixa direto: a resposta vem com
+   * Content-Disposition: attachment).
+   */
+  exportCollectionUrl: () => `${API_BASE_URL}/api/collection/export`,
+
   // Set icons
   setIconUrl: (code: string) =>
     `${API_BASE_URL}/api/sets/${encodeURIComponent(code)}/icon`,

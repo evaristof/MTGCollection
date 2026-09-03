@@ -34,6 +34,9 @@ interface CardRow extends CardFormState {
   adding?: boolean
   added?: boolean
   addError?: string
+  /** Preço consultado no Scryfall quando a linha entrou no lote. */
+  price?: number | null
+  priceStatus?: 'loading' | 'done' | 'error'
 }
 
 const emptyForm = (): CardFormState => ({
@@ -45,6 +48,15 @@ const emptyForm = (): CardFormState => ({
   localizacao: '',
   quantity: 1,
 })
+
+const formatMoney = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return '-'
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+  })
+}
 
 const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -224,6 +236,7 @@ export default function CadastroCartasPage() {
       editing: false,
     }
     setRows((prev) => [row, ...prev])
+    void lookupPrice(row)
     setForm((f) => nextForm(f))
     setNumberLookup('idle')
   }
@@ -231,10 +244,34 @@ export default function CadastroCartasPage() {
   const patchRow = (id: string, patch: Partial<CardRow>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
 
+  /**
+   * Preço atual da carta, mostrado na linha assim que ela entra no lote.
+   * Por número quando ele foi informado (mais preciso), senão por nome — a
+   * mesma precedência que o backend usa ao gravar na coleção.
+   */
+  const lookupPrice = async (row: CardRow) => {
+    if (!row.setCode || (!row.number && !row.name)) return
+    patchRow(row.id, { priceStatus: 'loading' })
+    try {
+      const res = row.number
+        ? await api.priceByNumber(row.setCode, row.number, row.foil)
+        : await api.priceByName(row.name, row.setCode, row.foil)
+      patchRow(row.id, { price: res.price, priceStatus: 'done' })
+    } catch {
+      // Carta sem preço no Scryfall, offline, etc. — a linha continua válida.
+      patchRow(row.id, { price: null, priceStatus: 'error' })
+    }
+  }
+
   const onRemoveRow = (id: string) => setRows((prev) => prev.filter((r) => r.id !== id))
 
-  const onToggleEdit = (id: string) =>
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, editing: !r.editing } : r)))
+  const onStartEdit = (id: string) => patchRow(id, { editing: true })
+
+  /** Fecha a edição e reconsulta o preço, que pode ter mudado de carta/set/foil. */
+  const onFinishEdit = (row: CardRow) => {
+    patchRow(row.id, { editing: false })
+    void lookupPrice({ ...row, editing: false })
+  }
 
   const onAddToCollection = async () => {
     if (rows.length === 0) {
@@ -291,6 +328,14 @@ export default function CadastroCartasPage() {
   }
 
   const pendingCount = rows.filter((r) => !r.added).length
+
+  const priceCell = (row: CardRow) => {
+    if (row.priceStatus === 'loading') return <span className="muted">consultando…</span>
+    if (row.price === null || row.price === undefined) {
+      return <span className="muted">{row.priceStatus === 'error' ? 'sem preço' : '-'}</span>
+    }
+    return formatMoney(row.price)
+  }
 
   return (
     <section className="page">
@@ -433,6 +478,7 @@ export default function CadastroCartasPage() {
                 <th>Foil</th>
                 <th>Localização</th>
                 <th>Qtd</th>
+                <th>Preço (US$)</th>
                 <th>Ações</th>
               </tr>
             </thead>
@@ -499,8 +545,9 @@ export default function CadastroCartasPage() {
                         style={{ width: 56 }}
                       />
                     </td>
+                    <td className="muted">{priceCell(row)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="btn btn--sm" onClick={() => onToggleEdit(row.id)}>
+                      <button className="btn btn--sm" onClick={() => onFinishEdit(row)}>
                         Concluir
                       </button>{' '}
                       <button className="btn btn--danger btn--sm" onClick={() => onRemoveRow(row.id)}>
@@ -532,12 +579,13 @@ export default function CadastroCartasPage() {
                     <td style={{ textAlign: 'center' }}>{row.foil ? '✓' : ''}</td>
                     <td>{row.localizacao || <span className="muted">—</span>}</td>
                     <td>{row.quantity}</td>
+                    <td>{priceCell(row)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       {row.added ? (
                         <span className="muted">✓ adicionada</span>
                       ) : (
                         <>
-                          <button className="btn btn--sm" onClick={() => onToggleEdit(row.id)} disabled={row.adding}>
+                          <button className="btn btn--sm" onClick={() => onStartEdit(row.id)} disabled={row.adding}>
                             Editar
                           </button>{' '}
                           <button
