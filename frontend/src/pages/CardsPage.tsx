@@ -182,21 +182,25 @@ export default function CardsPage() {
   )
 
   // The "Adicionar carta" form fields double as live filters for the grid:
-  // typing in Nome / Linguagem, picking a Set, changing Quantidade, or
-  // toggling Foil narrows the visible rows. Empty string / zero / false are
-  // treated as "no filter for this field".
+  // typing in Nome / Número / Linguagem / Localização, picking a Set, changing
+  // Quantidade, or toggling Foil narrows the visible rows. Empty string / zero
+  // / false are treated as "no filter for this field".
   const filteredCards = useMemo(() => {
     const nameQ = addForm.card_name.trim().toLowerCase()
+    const numberQ = (addForm.card_number ?? '').trim().toLowerCase()
     const langQ = addForm.language.trim().toLowerCase()
+    const locQ = (addForm.localizacao ?? '').trim().toLowerCase()
     const setQ = addForm.set_code.trim()
     const qty = addForm.quantity
     const foilOnly = addForm.foil
-    if (!nameQ && !langQ && !setQ && (!qty || qty <= 0) && !foilOnly) {
+    if (!nameQ && !numberQ && !langQ && !locQ && !setQ && (!qty || qty <= 0) && !foilOnly) {
       return cards
     }
     return cards.filter((c) => {
       if (nameQ && !c.card_name.toLowerCase().includes(nameQ)) return false
+      if (numberQ && !(c.card_number ?? '').toLowerCase().includes(numberQ)) return false
       if (langQ && !c.language.toLowerCase().includes(langQ)) return false
+      if (locQ && !(c.localizacao ?? '').toLowerCase().includes(locQ)) return false
       if (setQ && c.set_code !== setQ) return false
       if (qty && qty > 0 && c.quantity !== qty) return false
       if (foilOnly && !c.foil) return false
@@ -205,7 +209,7 @@ export default function CardsPage() {
   }, [cards, addForm])
 
   // Reset to first page whenever any of the filters change.
-  const filterKey = `${addForm.card_name}|${addForm.set_code}|${addForm.language}|${addForm.quantity}|${addForm.foil ? '1' : '0'}`
+  const filterKey = `${addForm.card_name}|${addForm.card_number ?? ''}|${addForm.set_code}|${addForm.language}|${addForm.localizacao ?? ''}|${addForm.quantity}|${addForm.foil ? '1' : '0'}`
 
   const {
     pageRows,
@@ -592,7 +596,8 @@ export default function CardsPage() {
       <form className="form" onSubmit={onAdd}>
         <h3>Adicionar / filtrar cartas</h3>
         <p className="muted">
-          Os campos abaixo também filtram o grid conforme você digita. Clique em{' '}
+          Os campos abaixo também filtram o grid conforme você digita (nome, número, set,
+          linguagem, localização, quantidade e foil). Clique em{' '}
           <strong>Adicionar carta</strong> para criar uma entrada com esses valores — o backend
           consulta o Scryfall automaticamente para preencher <code>collector_number</code> e{' '}
           <code>type_line</code>.

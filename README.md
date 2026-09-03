@@ -205,6 +205,17 @@ psql -h localhost -U admin -d mtgdb \
 
 O script cria uma localização por valor distinto já usado (com `TRIM`, agrupando maiúsculas/minúsculas), vincula cada carta à sua localização, cria a FK + índice e só então remove `LOCALIZACAO` — abortando se alguma carta ficasse sem vínculo. É idempotente: rodar de novo depois da migração não faz nada. `COLLECTION_CARD_DATA_DUMP.LOCALIZACAO` continua texto livre de propósito, porque snapshot é histórico e não deve mudar quando uma localização é renomeada.
 
+### Cartas divididas em duas pastas (PostgreSQL)
+
+Na planilha antiga, cópias da mesma carta em pastas diferentes eram uma linha só, com a quantidade de cada pasta entre parênteses (`Blue Pasta GameGenic (3) e Dragon Pasta Troca (5)`). Para transformar isso em uma linha por pasta:
+
+```bash
+psql -h localhost -U admin -d mtgdb \
+     -f backend/src/main/resources/db/migration/V5__split_multi_location_cards.sql
+```
+
+Roda depois da V4. Cada carta com localização composta vira duas linhas, com a quantidade que estava entre parênteses; se a divisão bater com uma linha que já existia (mesma carta, set, número, foil, linguagem e pasta), as quantidades são somadas numa linha só; as localizações compostas somem do catálogo. As quantidades entre parênteses são a fonte da verdade — se a soma delas for diferente da `QUANTITY` que a carta tinha, o script avisa linha a linha (`NOTICE`) antes de aplicar. Também é idempotente, e avisa sobre qualquer outra localização que ainda tenha quantidade no nome (para incluir novos casos, basta acrescentar as linhas correspondentes no `INSERT INTO tmp_split` do script).
+
 ## Front-end
 
 O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um menu superior e duas telas de CRUD para gerenciar a coleção:
