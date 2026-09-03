@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
+import { CardImageTooltip } from '../components/CardImageTooltip'
 import type { ReconciliationDiffRow, ReconciliationResult } from '../types/mtg'
 
 type Applied = 'added' | 'deleted' | 'equalized'
@@ -25,6 +26,41 @@ export default function ReconciliacaoPage() {
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<Record<string, RowState>>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  // (set|nome) → URL da imagem de referência, ou null quando não existe.
+  const previewCache = useRef<Map<string, string | null>>(new Map())
+
+  /**
+   * Imagem para a prévia de uma carta que ainda NÃO está na coleção (as que
+   * estão usam o id e o endpoint da tela Cartas). Com número do coletor a URL
+   * é direta; sem ele, o catálogo resolve um número para (set, nome).
+   */
+  const resolveCardImage = useCallback(
+    async (
+      setCode: string | null,
+      cardName: string,
+      cardNumber: string | null,
+    ): Promise<string[]> => {
+      const set = (setCode ?? '').trim()
+      const name = (cardName ?? '').trim()
+      const num = (cardNumber ?? '').trim()
+      if (!set || (!name && !num)) return []
+      if (num) return [api.scannerImageUrl(set, num)]
+
+      const cacheKey = `${set}::${name.toLowerCase()}`
+      const cached = previewCache.current.get(cacheKey)
+      if (cached !== undefined) return cached ? [cached] : []
+      try {
+        const res = await api.cardCatalogResolveNumber(set, name)
+        const url = api.scannerImageUrl(set, res.collector_number)
+        previewCache.current.set(cacheKey, url)
+        return [url]
+      } catch {
+        previewCache.current.set(cacheKey, null)
+        return []
+      }
+    },
+    [],
+  )
 
   const patch = (key: string, state: RowState) =>
     setRows((prev) => ({ ...prev, [key]: { ...prev[key], ...state } }))
@@ -151,7 +187,21 @@ export default function ReconciliacaoPage() {
 
   const identidade = (d: ReconciliationDiffRow) => (
     <>
-      <td title={d.sheet_rows.join(', ')}>{d.card_name}</td>
+      <td title={d.sheet_rows.join(', ')}>
+        {/* Cartas que já estão na coleção usam a imagem da própria carta
+            (mesma fonte da tela Cartas); as que só existem na planilha caem
+            na imagem de referência do catálogo, por (set, número). */}
+        {d.card_ids.length > 0 ? (
+          <CardImageTooltip cardId={d.card_ids[0]} cardName={d.card_name} />
+        ) : (
+          <CardImageTooltip
+            cardName={d.card_name}
+            resolveImageUrls={() => resolveCardImage(d.set_code, d.card_name, d.card_number)}
+          >
+            {d.card_name}
+          </CardImageTooltip>
+        )}
+      </td>
       <td title={d.set_code ?? undefined}>{d.set_name ?? d.set_code ?? '-'}</td>
       <td>{d.card_number ?? '-'}</td>
       <td style={{ textAlign: 'center' }}>{foilLabel(d.foil)}</td>
@@ -176,7 +226,8 @@ export default function ReconciliacaoPage() {
           <code>Pasta A (3) e Pasta B (5)</code> é lida como 3 cópias numa pasta e 5 na outra. A
           comparação é por set + nome + foil + idioma + localização (o número do coletor é
           opcional na planilha, então fica fora da chave), e só as localizações citadas na
-          planilha entram na conta.
+          planilha entram na conta. Passe o mouse sobre o nome da carta para ver a foto (scroll do
+          mouse dá zoom).
         </p>
         <div className="form__grid">
           <label>
