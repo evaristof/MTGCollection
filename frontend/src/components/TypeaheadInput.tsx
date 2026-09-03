@@ -13,6 +13,19 @@ interface TypeaheadInputProps {
   limit?: number
   onFocus?: () => void
   onBlur?: () => void
+  /** Ref do <input>, para o pai devolver o foco ao campo. */
+  inputRef?: React.RefObject<HTMLInputElement | null>
+  /**
+   * Abre a lista ao focar (padrão). Vale desligar em catálogos grandes, onde
+   * mostrar 25 nomes quaisquer só polui — digitar abre a lista do mesmo jeito.
+   */
+  openOnFocus?: boolean
+  /**
+   * O campo aceita valores que não estão na lista (ex.: uma localização nova).
+   * Nesse caso o Tab não confirma a sugestão em destaque só porque ela casa
+   * por pedaço com o que foi digitado — preserva o texto do usuário.
+   */
+  freeSolo?: boolean
   onMouseEnter?: () => void
   onMouseLeave?: () => void
   className?: string
@@ -29,6 +42,13 @@ interface TypeaheadInputProps {
  * substring match) on every keystroke, capped to `limit` results. Any value
  * can be typed and kept even if it doesn't match an option ("freeSolo") —
  * callers that need to restrict to the list validate on submit instead.
+ *
+ * <p>Keyboard: setas navegam, e tanto Enter quanto Tab escolhem o item em
+ * destaque — o Tab ainda leva o foco ao próximo campo, então cadastrar em
+ * lote é digitar, Tab, digitar, Tab. Em campos de texto livre
+ * ({@code freeSolo}), onde digitar um valor novo é normal, o Tab só confirma
+ * quando a escolha é inequívoca (navegou com as setas ou digitou o item
+ * inteiro); senão "Caixa" viraria "Caixa 3" sem ninguém pedir.</p>
  */
 export function TypeaheadInput({
   value,
@@ -41,6 +61,9 @@ export function TypeaheadInput({
   limit = 25,
   onFocus,
   onBlur,
+  inputRef,
+  openOnFocus = true,
+  freeSolo = false,
   onMouseEnter,
   onMouseLeave,
   className,
@@ -49,8 +72,12 @@ export function TypeaheadInput({
   const [open, setOpen] = useState(false)
   const [activeIdx, setActiveIdx] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const internalInputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = inputRef ?? internalInputRef
   const listRef = useRef<HTMLUListElement>(null)
+  // O usuário mexeu no destaque com as setas desde a última digitação?
+  // É o que separa "escolher com Tab" de "só sair do campo".
+  const navigatedRef = useRef(false)
 
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase()
@@ -88,6 +115,7 @@ export function TypeaheadInput({
     onChange(option)
     onSelect?.(option)
     setOpen(false)
+    navigatedRef.current = false
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -100,15 +128,36 @@ export function TypeaheadInput({
     switch (e.key) {
       case 'Escape':
         setOpen(false)
+        navigatedRef.current = false
         break
       case 'ArrowDown':
         e.preventDefault()
+        navigatedRef.current = true
         setActiveIdx((i) => Math.min(filtered.length - 1, i + 1))
         break
       case 'ArrowUp':
         e.preventDefault()
+        navigatedRef.current = true
         setActiveIdx((i) => Math.max(0, i - 1))
         break
+      case 'Tab': {
+        // Tab confirma o item em destaque igual ao Enter e deixa o próprio Tab
+        // levar o foco ao próximo campo (por isso NÃO chamamos preventDefault).
+        // Shift+Tab está voltando, então só fecha a lista.
+        const option = filtered[activeIdx]
+        const typedTheWholeOption =
+          option !== undefined && option.toLowerCase() === value.trim().toLowerCase()
+        // Em campo livre, confirmar um "casou por pedaço" apagaria o valor novo
+        // que o usuário está digitando — aí só confirma se ele escolheu mesmo.
+        const unambiguous = !freeSolo || navigatedRef.current || typedTheWholeOption
+        if (!e.shiftKey && option !== undefined && unambiguous) {
+          pick(option)
+        } else {
+          setOpen(false)
+          navigatedRef.current = false
+        }
+        break
+      }
       case 'Enter':
         if (filtered[activeIdx] !== undefined) {
           e.preventDefault()
@@ -125,7 +174,7 @@ export function TypeaheadInput({
   return (
     <div className={`typeahead ${className ?? ''}`} ref={rootRef} style={style}>
       <input
-        ref={inputRef}
+        ref={fieldRef}
         id={id}
         type="text"
         role="combobox"
@@ -141,9 +190,10 @@ export function TypeaheadInput({
           onChange(e.target.value)
           setActiveIdx(0)
           setOpen(true)
+          navigatedRef.current = false
         }}
         onFocus={() => {
-          setOpen(true)
+          if (openOnFocus) setOpen(true)
           onFocus?.()
         }}
         onBlur={onBlur}

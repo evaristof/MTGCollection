@@ -34,6 +34,13 @@ public final class CollectionSheetParser {
     public static final String HEADER_CARD = "Card";
     public static final String HEADER_SET = "Set";
     public static final String HEADER_FOIL = "Foil";
+    public static final String HEADER_TYPE = "Type";
+    public static final String HEADER_QTY = "Quantity";
+    public static final String HEADER_PRICE = "Price";
+    public static final String HEADER_TOTAL = "Total (Dolar)";
+    public static final String HEADER_COMMENT = "Comentário";
+    public static final String HEADER_LANG = "Language";
+    public static final String HEADER_LOC = "Localização";
 
     public static final int HEADER_ROW_INDEX = 2;   // row 3 in 1-based
     public static final int FIRST_DATA_ROW = 3;     // row 4 in 1-based
@@ -45,6 +52,7 @@ public final class CollectionSheetParser {
     public static final int COL_TYPE = 4;     // E
     public static final int COL_QTY = 5;      // F
     public static final int COL_PRICE = 6;    // G
+    public static final int COL_TOTAL = 7;    // H (fórmula G*F na planilha)
     public static final int COL_COMMENT = 8;  // I
     public static final int COL_LANG = 9;     // J
     public static final int COL_LOC = 10;     // K

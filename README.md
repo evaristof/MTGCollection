@@ -132,6 +132,7 @@ cd frontend && npm run lint && npm run build   # front-end
 | GET    | `/api/collection/cards/{id}`                               | Busca uma carta da coleção pelo id                                         |
 | PUT    | `/api/collection/cards/{id}`                               | Atualiza qty / foil / language (e opcionalmente name / set)                |
 | DELETE | `/api/collection/cards/{id}`                               | Remove a carta da coleção                                                  |
+| GET    | `/api/collection/export`                                    | Baixa a coleção inteira como .xlsx no mesmo layout que o importador lê (set pelo nome, foil como Sim/Não, coluna H com a fórmula preço × quantidade) |
 
 ### Reconciliação
 
@@ -229,7 +230,7 @@ Roda depois da V4. Cada carta com localização composta vira duas linhas, com a
 O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um menu superior e duas telas de CRUD para gerenciar a coleção:
 
 - **Sets** — listar, criar, alterar, deletar + botão para sincronizar do Scryfall
-- **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set
-- **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número, com zoom pelo scroll (mesmo tooltip da tela Cartas). "Adicionar" empilha a carta numa lista local editável; "Adicionar à coleção" grava tudo de uma vez, somando na quantidade quando a carta já existe na mesma localização
+- **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set, importar e **exportar** a coleção na planilha do template
+- **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número, com zoom pelo scroll (mesmo tooltip da tela Cartas). "Adicionar" empilha a carta numa lista local editável — já com o preço consultado no Scryfall — e "Adicionar à coleção" grava tudo de uma vez, somando na quantidade quando a carta já existe na mesma localização
 - **Cadastro de Localização** — CRUD simples (nome + descrição) das localizações físicas usadas no autocomplete acima
 - **Reconciliação Coleção** — importa a mesma planilha do "Importar coleção" e mostra três painéis de diferenças (só na planilha, só na base, quantidades diferentes), com ação por linha: cadastrar, apagar ou equalizar para a quantidade escolhida. A análise não grava nada; cada diferença é aplicada por você

@@ -34,6 +34,9 @@ interface CardRow extends CardFormState {
   adding?: boolean
   added?: boolean
   addError?: string
+  /** Preço consultado no Scryfall quando a linha entrou no lote. */
+  price?: number | null
+  priceStatus?: 'loading' | 'done' | 'error'
 }
 
 const emptyForm = (): CardFormState => ({
@@ -45,6 +48,15 @@ const emptyForm = (): CardFormState => ({
   localizacao: '',
   quantity: 1,
 })
+
+const formatMoney = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return '-'
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+  })
+}
 
 const uid = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -76,6 +88,12 @@ export default function CadastroCartasPage() {
   const [bulkAdding, setBulkAdding] = useState(false)
   const [numberLookup, setNumberLookup] = useState<'idle' | 'loading' | 'found' | 'notfound'>('idle')
 
+  // Foco volta para o nome depois de empilhar uma carta, para cadastrar o
+  // lote inteiro sem tirar a mão do teclado. O foco é pedido por um contador
+  // e aplicado num efeito: chamar focus() dentro do próprio clique acontece
+  // ANTES do React re-renderizar a lista/o formulário, e o foco se perdia.
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const [focusNameRequest, setFocusNameRequest] = useState(0)
   // (set|name) → reference image URL, or null when the catalog has none.
   // Keeps hovering the same card from re-querying the collector number.
   const previewCache = useRef<Map<string, string | null>>(new Map())
@@ -96,6 +114,13 @@ export default function CadastroCartasPage() {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (focusNameRequest === 0) return
+    const input =
+      nameInputRef.current ?? (document.getElementById('cc-name') as HTMLInputElement | null)
+    input?.focus()
+  }, [focusNameRequest])
 
   const fullSetOptions: SetComboOption[] = useMemo(
     () =>
@@ -224,17 +249,43 @@ export default function CadastroCartasPage() {
       editing: false,
     }
     setRows((prev) => [row, ...prev])
+    void lookupPrice(row)
     setForm((f) => nextForm(f))
     setNumberLookup('idle')
+    setFocusNameRequest((n) => n + 1)
   }
 
   const patchRow = (id: string, patch: Partial<CardRow>) =>
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
 
+  /**
+   * Preço atual da carta, mostrado na linha assim que ela entra no lote.
+   * Por número quando ele foi informado (mais preciso), senão por nome — a
+   * mesma precedência que o backend usa ao gravar na coleção.
+   */
+  const lookupPrice = async (row: CardRow) => {
+    if (!row.setCode || (!row.number && !row.name)) return
+    patchRow(row.id, { priceStatus: 'loading' })
+    try {
+      const res = row.number
+        ? await api.priceByNumber(row.setCode, row.number, row.foil)
+        : await api.priceByName(row.name, row.setCode, row.foil)
+      patchRow(row.id, { price: res.price, priceStatus: 'done' })
+    } catch {
+      // Carta sem preço no Scryfall, offline, etc. — a linha continua válida.
+      patchRow(row.id, { price: null, priceStatus: 'error' })
+    }
+  }
+
   const onRemoveRow = (id: string) => setRows((prev) => prev.filter((r) => r.id !== id))
 
-  const onToggleEdit = (id: string) =>
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, editing: !r.editing } : r)))
+  const onStartEdit = (id: string) => patchRow(id, { editing: true })
+
+  /** Fecha a edição e reconsulta o preço, que pode ter mudado de carta/set/foil. */
+  const onFinishEdit = (row: CardRow) => {
+    patchRow(row.id, { editing: false })
+    void lookupPrice({ ...row, editing: false })
+  }
 
   const onAddToCollection = async () => {
     if (rows.length === 0) {
@@ -292,6 +343,14 @@ export default function CadastroCartasPage() {
 
   const pendingCount = rows.filter((r) => !r.added).length
 
+  const priceCell = (row: CardRow) => {
+    if (row.priceStatus === 'loading') return <span className="muted">consultando…</span>
+    if (row.price === null || row.price === undefined) {
+      return <span className="muted">{row.priceStatus === 'error' ? 'sem preço' : '-'}</span>
+    }
+    return formatMoney(row.price)
+  }
+
   return (
     <section className="page">
       <div className="toolbar">
@@ -318,6 +377,11 @@ export default function CadastroCartasPage() {
             >
               <TypeaheadInput
                 id="cc-name"
+                inputRef={nameInputRef}
+                // Catálogo grande: a lista abre ao digitar, não ao focar —
+                // senão, ao voltar o foco depois de "Adicionar", apareceriam
+                // 25 nomes quaisquer.
+                openOnFocus={false}
                 value={form.name}
                 onChange={onNameChange}
                 onSelect={(v) => void onNameSelect(v)}
@@ -379,6 +443,7 @@ export default function CadastroCartasPage() {
             <span>Localização</span>
             <TypeaheadInput
               id="cc-localizacao"
+              freeSolo
               value={form.localizacao}
               onChange={(v) => setForm((f) => ({ ...f, localizacao: v }))}
               onSelect={(v) => setForm((f) => ({ ...f, localizacao: v }))}
@@ -433,6 +498,7 @@ export default function CadastroCartasPage() {
                 <th>Foil</th>
                 <th>Localização</th>
                 <th>Qtd</th>
+                <th>Preço (US$)</th>
                 <th>Ações</th>
               </tr>
             </thead>
@@ -483,6 +549,7 @@ export default function CadastroCartasPage() {
                     </td>
                     <td>
                       <TypeaheadInput
+                        freeSolo
                         value={row.localizacao}
                         onChange={(v) => patchRow(row.id, { localizacao: v })}
                         onSelect={(v) => patchRow(row.id, { localizacao: v })}
@@ -499,8 +566,9 @@ export default function CadastroCartasPage() {
                         style={{ width: 56 }}
                       />
                     </td>
+                    <td className="muted">{priceCell(row)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="btn btn--sm" onClick={() => onToggleEdit(row.id)}>
+                      <button className="btn btn--sm" onClick={() => onFinishEdit(row)}>
                         Concluir
                       </button>{' '}
                       <button className="btn btn--danger btn--sm" onClick={() => onRemoveRow(row.id)}>
@@ -532,12 +600,13 @@ export default function CadastroCartasPage() {
                     <td style={{ textAlign: 'center' }}>{row.foil ? '✓' : ''}</td>
                     <td>{row.localizacao || <span className="muted">—</span>}</td>
                     <td>{row.quantity}</td>
+                    <td>{priceCell(row)}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
                       {row.added ? (
                         <span className="muted">✓ adicionada</span>
                       ) : (
                         <>
-                          <button className="btn btn--sm" onClick={() => onToggleEdit(row.id)} disabled={row.adding}>
+                          <button className="btn btn--sm" onClick={() => onStartEdit(row.id)} disabled={row.adding}>
                             Editar
                           </button>{' '}
                           <button

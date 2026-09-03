@@ -548,6 +548,22 @@ export default function CardsPage() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              // A resposta vem como attachment, então o navegador baixa o
+              // arquivo sem tirar o usuário da tela.
+              window.location.href = api.exportCollectionUrl()
+            }}
+            disabled={viewingDump}
+            title={
+              viewingDump
+                ? 'Selecione "— atual —" para exportar a coleção'
+                : 'Baixa a coleção inteira no mesmo formato do "Importar coleção"'
+            }
+          >
+            Exportar coleção
+          </button>
+          <button
+            type="button"
             onClick={() => void onCreateDump()}
             disabled={dumpBusy || viewingDump}
             title={
@@ -654,6 +670,7 @@ export default function CardsPage() {
                 novo também funciona — o backend cadastra na primeira vez. */}
             <TypeaheadInput
               id="add-localizacao"
+              freeSolo
               value={addForm.localizacao ?? ''}
               onChange={(v) => setAddForm({ ...addForm, localizacao: v })}
               onSelect={(v) => setAddForm({ ...addForm, localizacao: v })}
@@ -755,6 +772,7 @@ export default function CardsPage() {
               <span>Localização</span>
               <TypeaheadInput
                 id="edit-localizacao"
+                freeSolo
                 value={editing.localizacao}
                 onChange={(v) => setEditing({ ...editing, localizacao: v })}
                 onSelect={(v) => setEditing({ ...editing, localizacao: v })}

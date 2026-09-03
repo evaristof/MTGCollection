@@ -511,6 +511,7 @@ export default function ScannerPage() {
                     {/* Catálogo de localizações (tabela LOCATION); digitar um
                         valor novo também funciona — o backend cadastra. */}
                     <TypeaheadInput
+                      freeSolo
                       value={row.localizacao}
                       placeholder="Caixa 3"
                       onChange={(v) => patchRow(row.id, { localizacao: v })}
