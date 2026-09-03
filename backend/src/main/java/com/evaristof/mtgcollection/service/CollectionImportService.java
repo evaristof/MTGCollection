@@ -1,6 +1,7 @@
 package com.evaristof.mtgcollection.service;
 
 import com.evaristof.mtgcollection.domain.CollectionCard;
+import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.domain.MagicSet;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.repository.MagicSetRepository;
@@ -90,17 +91,20 @@ public class CollectionImportService {
     private final CollectionCardRepository cardRepository;
     private final MagicSetRepository setRepository;
     private final SetPersistenceService setPersistenceService;
+    private final LocationService locationService;
     private final long throttleMs;
 
     public CollectionImportService(CardBatchLookupService cardBatchLookupService,
                                    CollectionCardRepository cardRepository,
                                    MagicSetRepository setRepository,
                                    SetPersistenceService setPersistenceService,
+                                   LocationService locationService,
                                    @Value("${mtg.import.throttle-ms:100}") long throttleMs) {
         this.cardBatchLookupService = cardBatchLookupService;
         this.cardRepository = cardRepository;
         this.setRepository = setRepository;
         this.setPersistenceService = setPersistenceService;
+        this.locationService = locationService;
         this.throttleMs = Math.max(0L, throttleMs);
     }
 
@@ -421,7 +425,11 @@ public class CollectionImportService {
         entity.setPrice(price);
         entity.setComentario(comentario);
         entity.setLanguage(language == null || language.isBlank() ? null : language);
-        entity.setLocalizacao(localizacao);
+        // Column K of the spreadsheet is a location NAME — map it onto the
+        // LOCATION catalog, creating the row the first time it shows up.
+        entity.setLocation(localizacao == null || localizacao.isBlank()
+                ? null
+                : locationService.findOrCreateByName(localizacao));
         cardRepository.save(entity);
         job.incrementPersisted();
     }

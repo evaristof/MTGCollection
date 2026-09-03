@@ -1,9 +1,11 @@
 import type {
+  CardCatalogSetOption,
   CardPrice,
   CollectionCard,
   DataJobSnapshot,
   DataManagementStats,
   ImportJobSnapshot,
+  Location,
   MagicSet,
   PriceMoversResponse,
   ScannerMatchResult,
@@ -80,8 +82,14 @@ export interface AddCardInput {
   foil: boolean
   language: string
   quantity: number
-  /** Optional physical location; saved to the card if provided. */
+  /**
+   * Optional physical location, by NAME. The backend resolves it against the
+   * LOCATION catalog and creates the row the first time a name shows up, so
+   * typing a brand-new location works from any screen.
+   */
   localizacao?: string
+  /** Optional explicit FK into the location catalog (wins over `localizacao`). */
+  location_id?: number
   /**
    * Optional collector number. When set, the backend resolves the card by
    * (set, number) instead of by name — more precise (e.g. from the scanner).
@@ -108,7 +116,10 @@ export interface UpdateCardInput {
   card_type?: string
   price?: number | null
   comentario?: string
+  /** Location NAME; created on first use. `""` clears the card's location. */
   localizacao?: string
+  /** Explicit FK into the location catalog (wins over `localizacao`). */
+  location_id?: number
 }
 
 export const api = {
@@ -328,6 +339,42 @@ export const api = {
 
   dataJob: (jobId: string) =>
     request<DataJobSnapshot>(`/api/data-management/jobs/${encodeURIComponent(jobId)}`),
+
+  // Locations (physical storage — boxes, binders…), backing the
+  // "Cadastro de Localização" screen and the location autocomplete on
+  // "Cadastro Cartas".
+  listLocations: () => request<Location[]>('/api/locations'),
+  createLocation: (body: { name: string; description?: string }) =>
+    request<Location>('/api/locations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateLocation: (id: number, body: { name: string; description?: string }) =>
+    request<Location>(`/api/locations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteLocation: (id: number) =>
+    request<void>(`/api/locations/${id}`, { method: 'DELETE' }),
+
+  // Card catalog (from CARD_IMAGE_HASH) — fast-entry helpers for "Cadastro
+  // Cartas": name autocomplete, sets a card was printed in, and lookups
+  // between collector number and name.
+  cardCatalogNames: () => request<string[]>('/api/card-catalog/names'),
+  cardCatalogSets: (name: string) =>
+    request<CardCatalogSetOption[]>(`/api/card-catalog/sets?name=${encodeURIComponent(name)}`),
+  cardCatalogLookupNumber: (setCode: string, number: string) =>
+    request<{ card_name: string }>(
+      `/api/card-catalog/lookup-number?set=${encodeURIComponent(setCode)}&number=${encodeURIComponent(number)}`,
+    ),
+  cardCatalogResolveNumber: (setCode: string, name: string) =>
+    request<{ collector_number: string }>(
+      `/api/card-catalog/resolve-number?set=${encodeURIComponent(setCode)}&name=${encodeURIComponent(name)}`,
+    ),
+  // Image preview by (set, collector number) for cards not yet in the
+  // collection — same reference images the scanner uses.
+  scannerImageUrl: (setCode: string, number: string) =>
+    `${API_BASE_URL}/api/scanner/image/${encodeURIComponent(setCode)}/${encodeURIComponent(number)}`,
 
   // Requests cooperative cancellation of a running job (e.g. "finalizar
   // download"). The worker stops between cards and settles as CANCELLED.

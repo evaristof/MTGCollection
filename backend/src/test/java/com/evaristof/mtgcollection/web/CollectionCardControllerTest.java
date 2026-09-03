@@ -1,7 +1,9 @@
 package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.CollectionCard;
+import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.service.CollectionCardService;
+import com.evaristof.mtgcollection.service.LocationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +43,9 @@ class CollectionCardControllerTest {
 
     @MockBean
     private CollectionCardService service;
+
+    @MockBean
+    private LocationService locationService;
 
     private static CollectionCard sampleEntity() {
         CollectionCard c = new CollectionCard();
@@ -138,8 +143,11 @@ class CollectionCardControllerTest {
 
     @Test
     void put_updatesAndReturnsEntity() throws Exception {
+        Location boxA = new Location("Box A", null);
+        boxA.setId(3L);
+        when(locationService.resolve(null, "Box A")).thenReturn(boxA);
         when(service.update(eq(1L), anyString(), anyString(), anyBoolean(), anyString(), anyInt(),
-                any(), any(), any(), any()))
+                any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(sampleEntity());
 
         String body = objectMapper.writeValueAsString(new java.util.LinkedHashMap<String, Object>() {{
@@ -160,15 +168,17 @@ class CollectionCardControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id", is(1)));
 
+        // The location name was resolved to its catalog row before the update,
+        // and `changeLocation` is true because the request carried the field.
         verify(service).update(1L, "Lightning Bolt", "2x2", true, "en", 4,
-                "Instant", new java.math.BigDecimal("1.23"), "mint", "Box A");
+                "Instant", new java.math.BigDecimal("1.23"), "mint", boxA, true);
     }
 
     @Test
     void put_returns404WhenMissing() throws Exception {
         doThrow(new java.util.NoSuchElementException("nope"))
                 .when(service).update(eq(42L), any(), any(), anyBoolean(), anyString(), anyInt(),
-                        any(), any(), any(), any());
+                        any(), any(), any(), any(), anyBoolean());
 
         String body = objectMapper.writeValueAsString(Map.of(
                 "foil", false, "language", "en", "quantity", 1));

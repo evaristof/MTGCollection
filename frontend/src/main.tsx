@@ -7,8 +7,10 @@ import HomePage from './pages/HomePage.tsx'
 import DataManagementPage from './pages/DataManagementPage.tsx'
 import SetsPage from './pages/SetsPage.tsx'
 import CardsPage from './pages/CardsPage.tsx'
+import CadastroCartasPage from './pages/CadastroCartasPage.tsx'
 import ChartsPage from './pages/ChartsPage.tsx'
 import ScannerPage from './pages/ScannerPage.tsx'
+import LocationPage from './pages/LocationPage.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -19,8 +21,10 @@ createRoot(document.getElementById('root')!).render(
           <Route path="data-management" element={<DataManagementPage />} />
           <Route path="sets" element={<SetsPage />} />
           <Route path="cards" element={<CardsPage />} />
+          <Route path="cadastro-cartas" element={<CadastroCartasPage />} />
           <Route path="charts" element={<ChartsPage />} />
           <Route path="scanner" element={<ScannerPage />} />
+          <Route path="localizacoes" element={<LocationPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

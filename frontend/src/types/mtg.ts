@@ -47,7 +47,10 @@ export interface CollectionCard {
   quantity: number
   price?: number | null
   comentario?: string | null
+  /** Location NAME, derived from the LOCATION_ID FK (read-only). */
   localizacao?: string | null
+  /** FK into the location catalog (`null` when the card has no location). */
+  location_id?: number | null
 }
 
 /**
@@ -162,4 +165,22 @@ export interface CardPrice {
   foil: boolean
   currency: string
   price: number | null
+}
+
+/**
+ * A physical storage location for cards (GET/POST/PUT /api/locations).
+ */
+export interface Location {
+  id: number
+  name: string
+  description?: string | null
+}
+
+/**
+ * One entry in GET /api/card-catalog/sets?name=... — a set that contains a
+ * printing of the given card, sourced from the CARD_IMAGE_HASH catalog.
+ */
+export interface CardCatalogSetOption {
+  set_code: string
+  set_name: string
 }

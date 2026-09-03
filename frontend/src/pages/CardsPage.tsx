@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type AddCardInput } from '../api/client'
-import type { CollectionCard, MagicSet } from '../types/mtg'
+import type { CollectionCard, Location, MagicSet } from '../types/mtg'
 import { useTableControls } from '../hooks/useTableControls'
 import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
 import { SetCombo } from '../components/SetCombo'
+import { TypeaheadInput } from '../components/TypeaheadInput'
 import { ImportCollectionDialog } from '../components/ImportCollectionDialog'
 import { CardImageTooltip } from '../components/CardImageTooltip'
 
@@ -95,6 +96,7 @@ export default function CardsPage() {
   // Seleção em lote (ids de `CollectionCard`). O checkbox do header é um
   // master controlado pelo estado: checked quando todas as linhas visíveis
   // estão selecionadas, indeterminate quando apenas parte está.
+  const [locations, setLocations] = useState<Location[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
   const masterCheckboxRef = useRef<HTMLInputElement>(null)
@@ -145,6 +147,18 @@ export default function CardsPage() {
       })
   }, [])
 
+  useEffect(() => {
+    // location catalog for the "Localização" autocomplete — best-effort
+    void api
+      .listLocations()
+      .then(setLocations)
+      .catch(() => {
+        /* ignore */
+      })
+  }, [])
+
+  const locationNames = useMemo(() => locations.map((l) => l.name), [locations])
+
   const setOptions = useMemo(
     () =>
       sets
@@ -168,21 +182,25 @@ export default function CardsPage() {
   )
 
   // The "Adicionar carta" form fields double as live filters for the grid:
-  // typing in Nome / Linguagem, picking a Set, changing Quantidade, or
-  // toggling Foil narrows the visible rows. Empty string / zero / false are
-  // treated as "no filter for this field".
+  // typing in Nome / Número / Linguagem / Localização, picking a Set, changing
+  // Quantidade, or toggling Foil narrows the visible rows. Empty string / zero
+  // / false are treated as "no filter for this field".
   const filteredCards = useMemo(() => {
     const nameQ = addForm.card_name.trim().toLowerCase()
+    const numberQ = (addForm.card_number ?? '').trim().toLowerCase()
     const langQ = addForm.language.trim().toLowerCase()
+    const locQ = (addForm.localizacao ?? '').trim().toLowerCase()
     const setQ = addForm.set_code.trim()
     const qty = addForm.quantity
     const foilOnly = addForm.foil
-    if (!nameQ && !langQ && !setQ && (!qty || qty <= 0) && !foilOnly) {
+    if (!nameQ && !numberQ && !langQ && !locQ && !setQ && (!qty || qty <= 0) && !foilOnly) {
       return cards
     }
     return cards.filter((c) => {
       if (nameQ && !c.card_name.toLowerCase().includes(nameQ)) return false
+      if (numberQ && !(c.card_number ?? '').toLowerCase().includes(numberQ)) return false
       if (langQ && !c.language.toLowerCase().includes(langQ)) return false
+      if (locQ && !(c.localizacao ?? '').toLowerCase().includes(locQ)) return false
       if (setQ && c.set_code !== setQ) return false
       if (qty && qty > 0 && c.quantity !== qty) return false
       if (foilOnly && !c.foil) return false
@@ -191,7 +209,7 @@ export default function CardsPage() {
   }, [cards, addForm])
 
   // Reset to first page whenever any of the filters change.
-  const filterKey = `${addForm.card_name}|${addForm.set_code}|${addForm.language}|${addForm.quantity}|${addForm.foil ? '1' : '0'}`
+  const filterKey = `${addForm.card_name}|${addForm.card_number ?? ''}|${addForm.set_code}|${addForm.language}|${addForm.localizacao ?? ''}|${addForm.quantity}|${addForm.foil ? '1' : '0'}`
 
   const {
     pageRows,
@@ -578,7 +596,8 @@ export default function CardsPage() {
       <form className="form" onSubmit={onAdd}>
         <h3>Adicionar / filtrar cartas</h3>
         <p className="muted">
-          Os campos abaixo também filtram o grid conforme você digita. Clique em{' '}
+          Os campos abaixo também filtram o grid conforme você digita (nome, número, set,
+          linguagem, localização, quantidade e foil). Clique em{' '}
           <strong>Adicionar carta</strong> para criar uma entrada com esses valores — o backend
           consulta o Scryfall automaticamente para preencher <code>collector_number</code> e{' '}
           <code>type_line</code>.
@@ -631,9 +650,14 @@ export default function CardsPage() {
           </label>
           <label>
             <span>Localização (opcional)</span>
-            <input
+            {/* Catálogo de localizações (tabela LOCATION); digitar um valor
+                novo também funciona — o backend cadastra na primeira vez. */}
+            <TypeaheadInput
+              id="add-localizacao"
               value={addForm.localizacao ?? ''}
-              onChange={(e) => setAddForm({ ...addForm, localizacao: e.target.value })}
+              onChange={(v) => setAddForm({ ...addForm, localizacao: v })}
+              onSelect={(v) => setAddForm({ ...addForm, localizacao: v })}
+              options={locationNames}
               placeholder="ex: Caixa 3"
             />
           </label>
@@ -729,9 +753,12 @@ export default function CardsPage() {
             </label>
             <label>
               <span>Localização</span>
-              <input
+              <TypeaheadInput
+                id="edit-localizacao"
                 value={editing.localizacao}
-                onChange={(e) => setEditing({ ...editing, localizacao: e.target.value })}
+                onChange={(v) => setEditing({ ...editing, localizacao: v })}
+                onSelect={(v) => setEditing({ ...editing, localizacao: v })}
+                options={locationNames}
                 placeholder="ex.: Caixa A / Página 3"
               />
             </label>

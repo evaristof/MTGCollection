@@ -1,6 +1,7 @@
 package com.evaristof.mtgcollection.service;
 
 import com.evaristof.mtgcollection.domain.CollectionCard;
+import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +27,12 @@ class CollectionCardServiceTest {
         cardLookupService = mock(CardLookupService.class);
         repository = mock(CollectionCardRepository.class);
         service = new CollectionCardService(cardLookupService, repository);
+    }
+
+    private static Location location(Long id, String name) {
+        Location l = new Location(name, null);
+        l.setId(id);
+        return l;
     }
 
     private static ScryfallCard card(String name, String set, String number, String typeLine) {
@@ -93,7 +100,7 @@ class CollectionCardServiceTest {
         when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        service.addCardToCollection(null, "uds", true, "pt", 1, "Caixa 3", "75");
+        service.addCardToCollection(null, "uds", true, "pt", 1, location(7L, "Caixa 3"), "75");
 
         ArgumentCaptor<CollectionCard> captor = ArgumentCaptor.forClass(CollectionCard.class);
         verify(repository).save(captor.capture());
@@ -113,22 +120,71 @@ class CollectionCardServiceTest {
     void addCardToCollection_mergesIntoExistingStack_whenSameIdentity() {
         when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2"))
                 .thenReturn(card("Lightning Bolt", "2x2", "117", "Instant"));
+        Location caixa1 = location(1L, "Caixa 1");
         CollectionCard existing = new CollectionCard();
         existing.setSetCode("2x2");
         existing.setCardNumber("117");
         existing.setFoil(true);
         existing.setLanguage("en");
         existing.setQuantity(2);
-        existing.setLocalizacao("Caixa 1");
-        when(repository.findAllBySetCodeAndCardNumberAndFoilAndLanguage("2x2", "117", true, "en"))
+        existing.setLocation(caixa1);
+        when(repository.findAllBySetCodeAndCardNumberAndFoil("2x2", "117", true))
                 .thenReturn(List.of(existing));
         when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        CollectionCard saved = service.addCardToCollection("Lightning Bolt", "2x2", true, "en", 3, "Caixa 1", null);
+        CollectionCard saved = service.addCardToCollection("Lightning Bolt", "2x2", true, "en", 3, caixa1, null);
 
         assertThat(saved).isSameAs(existing);
         assertThat(existing.getQuantity()).isEqualTo(5); // 2 + 3, not a new row
+    }
+
+    @Test
+    void addCardToCollection_mergesIntoExistingStack_whenLanguageDiffersOnlyByCase() {
+        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2"))
+                .thenReturn(card("Lightning Bolt", "2x2", "117", "Instant"));
+        Location caixa1 = location(1L, "Caixa 1");
+        CollectionCard existing = new CollectionCard();
+        existing.setSetCode("2x2");
+        existing.setCardNumber("117");
+        existing.setFoil(true);
+        existing.setLanguage("EN");
+        existing.setQuantity(1);
+        existing.setLocation(caixa1);
+        when(repository.findAllBySetCodeAndCardNumberAndFoil("2x2", "117", true))
+                .thenReturn(List.of(existing));
+        when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        CollectionCard saved = service.addCardToCollection("Lightning Bolt", "2x2", true, "en", 1, caixa1, null);
+
+        assertThat(saved).isSameAs(existing);
+        assertThat(existing.getQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void addCardToCollection_mergesByName_whenStackHasNoCollectorNumber() {
+        // Scryfall didn't give a collector number (or the stored row came from
+        // an import without one) → the stack is matched by set + name + foil.
+        when(cardLookupService.getCardByNameAndSet("Sol Ring", "cmr"))
+                .thenReturn(card("Sol Ring", "cmr", null, "Artifact"));
+        Location caixa2 = location(2L, "Caixa 2");
+        CollectionCard existing = new CollectionCard();
+        existing.setSetCode("cmr");
+        existing.setCardName("Sol Ring");
+        existing.setFoil(false);
+        existing.setLanguage("en");
+        existing.setQuantity(4);
+        existing.setLocation(caixa2);
+        when(repository.findAllBySetCodeAndCardNameIgnoreCaseAndFoil("cmr", "Sol Ring", false))
+                .thenReturn(List.of(existing));
+        when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
+                .thenAnswer(inv -> inv.getArgument(0));
+
+        CollectionCard saved = service.addCardToCollection("Sol Ring", "cmr", false, "en", 2, caixa2, null);
+
+        assertThat(saved).isSameAs(existing);
+        assertThat(existing.getQuantity()).isEqualTo(6);
     }
 
     @Test
@@ -141,17 +197,19 @@ class CollectionCardServiceTest {
         other.setFoil(true);
         other.setLanguage("en");
         other.setQuantity(2);
-        other.setLocalizacao("Caixa 1");
-        when(repository.findAllBySetCodeAndCardNumberAndFoilAndLanguage("2x2", "117", true, "en"))
+        other.setLocation(location(1L, "Caixa 1"));
+        when(repository.findAllBySetCodeAndCardNumberAndFoil("2x2", "117", true))
                 .thenReturn(List.of(other));
         when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
 
-        CollectionCard saved = service.addCardToCollection("Lightning Bolt", "2x2", true, "en", 1, "Caixa 9", null);
+        CollectionCard saved = service.addCardToCollection(
+                "Lightning Bolt", "2x2", true, "en", 1, location(9L, "Caixa 9"), null);
 
         assertThat(saved).isNotSameAs(other); // different location → new stack
         assertThat(saved.getQuantity()).isEqualTo(1);
         assertThat(saved.getLocalizacao()).isEqualTo("Caixa 9");
+        assertThat(saved.getLocationId()).isEqualTo(9L);
         assertThat(other.getQuantity()).isEqualTo(2); // untouched
     }
 

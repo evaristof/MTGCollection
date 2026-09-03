@@ -566,6 +566,52 @@ label.inline {
   font-style: italic;
 }
 
+/* ---------- Typeahead (TypeaheadInput) ---------- */
+
+.typeahead {
+  position: relative;
+  width: 100%;
+}
+
+.typeahead__input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.typeahead__list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  width: max-content;
+  max-width: min(480px, 90vw);
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--bg-alt);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.typeahead__option {
+  padding: 0.45rem 0.65rem;
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.typeahead__option--active {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+
 /* ---------- Sortable headers ---------- */
 
 thead th[aria-sort] {
