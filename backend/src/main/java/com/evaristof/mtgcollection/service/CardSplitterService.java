@@ -134,6 +134,7 @@ public class CardSplitterService {
                 (double) SEARCH_MAX_DIM / Math.max(sourceBgr.rows(), sourceBgr.cols()));
         Mat small = new Mat();
         Mat gray = new Mat();
+        Mat lifted = new Mat();
         Mat equalized = new Mat();
         Mat blurred = new Mat();
         Mat scratch = new Mat();
@@ -146,11 +147,16 @@ public class CardSplitterService {
         try {
             Imgproc.resize(sourceBgr, small, new Size(), scale, scale, Imgproc.INTER_AREA);
             Imgproc.cvtColor(small, gray, Imgproc.COLOR_BGR2GRAY);
+            // Lift shadows on UNDEREXPOSED photos (dark cards on a black binder):
+            // an auto-gamma maps the image's mean toward mid-grey so faint card
+            // edges emerge for the detector. It only ever brightens (gamma<=1), so
+            // normal/bright photos pass through unchanged — no regression there.
+            autoGammaLift(gray, lifted);
             // Normalise local contrast (CLAHE) so the SAME edge detector works
             // whether the cards are light-on-light (white cards, white binder) or
             // dark-on-dark (black cards, black binder + glare) — the two extremes
             // in the sample set. Without this, fixed Canny thresholds miss one end.
-            clahe.apply(gray, equalized);
+            clahe.apply(lifted, equalized);
             Imgproc.bilateralFilter(equalized, blurred, 9, 75, 75);
             // Cards here often have dark frames as dark as the binder pocket, so a
             // brightness threshold can't isolate them. Their EDGES are strong
@@ -201,6 +207,7 @@ public class CardSplitterService {
         } finally {
             small.release();
             gray.release();
+            lifted.release();
             equalized.release();
             blurred.release();
             scratch.release();
@@ -212,6 +219,34 @@ public class CardSplitterService {
             for (MatOfPoint c : contours) {
                 c.release();
             }
+        }
+    }
+
+    /**
+     * Brightens an underexposed grey image with a gamma curve that pushes its
+     * mean toward mid-grey, writing to {@code dst}. Clamped so it only ever
+     * brightens (gamma ≤ 1) — a normal or bright photo is copied unchanged, so
+     * this never darkens the clean cases.
+     */
+    private static void autoGammaLift(Mat gray, Mat dst) {
+        double mean = Core.mean(gray).val[0];
+        if (mean <= 0 || mean >= 128) {
+            gray.copyTo(dst);
+            return;
+        }
+        // gamma < 1 that maps the mean to ~128; bounded so very dark photos don't
+        // get blown up into noise.
+        double gamma = Math.max(0.35, Math.min(1.0, Math.log(0.5) / Math.log(mean / 255.0)));
+        Mat lut = new Mat(1, 256, CvType.CV_8U);
+        byte[] table = new byte[256];
+        for (int i = 0; i < 256; i++) {
+            table[i] = (byte) Math.min(255, Math.round(Math.pow(i / 255.0, gamma) * 255.0));
+        }
+        lut.put(0, 0, table);
+        try {
+            Core.LUT(gray, lut, dst);
+        } finally {
+            lut.release();
         }
     }
 
