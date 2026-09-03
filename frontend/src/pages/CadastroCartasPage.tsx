@@ -443,6 +443,7 @@ export default function CadastroCartasPage() {
             <span>Localização</span>
             <TypeaheadInput
               id="cc-localizacao"
+              freeSolo
               value={form.localizacao}
               onChange={(v) => setForm((f) => ({ ...f, localizacao: v }))}
               onSelect={(v) => setForm((f) => ({ ...f, localizacao: v }))}
@@ -548,6 +549,7 @@ export default function CadastroCartasPage() {
                     </td>
                     <td>
                       <TypeaheadInput
+                        freeSolo
                         value={row.localizacao}
                         onChange={(v) => patchRow(row.id, { localizacao: v })}
                         onSelect={(v) => patchRow(row.id, { localizacao: v })}

@@ -670,6 +670,7 @@ export default function CardsPage() {
                 novo também funciona — o backend cadastra na primeira vez. */}
             <TypeaheadInput
               id="add-localizacao"
+              freeSolo
               value={addForm.localizacao ?? ''}
               onChange={(v) => setAddForm({ ...addForm, localizacao: v })}
               onSelect={(v) => setAddForm({ ...addForm, localizacao: v })}
@@ -771,6 +772,7 @@ export default function CardsPage() {
               <span>Localização</span>
               <TypeaheadInput
                 id="edit-localizacao"
+                freeSolo
                 value={editing.localizacao}
                 onChange={(v) => setEditing({ ...editing, localizacao: v })}
                 onSelect={(v) => setEditing({ ...editing, localizacao: v })}

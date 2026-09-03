@@ -20,6 +20,12 @@ interface TypeaheadInputProps {
    * mostrar 25 nomes quaisquer só polui — digitar abre a lista do mesmo jeito.
    */
   openOnFocus?: boolean
+  /**
+   * O campo aceita valores que não estão na lista (ex.: uma localização nova).
+   * Nesse caso o Tab não confirma a sugestão em destaque só porque ela casa
+   * por pedaço com o que foi digitado — preserva o texto do usuário.
+   */
+  freeSolo?: boolean
   onMouseEnter?: () => void
   onMouseLeave?: () => void
   className?: string
@@ -37,12 +43,12 @@ interface TypeaheadInputProps {
  * can be typed and kept even if it doesn't match an option ("freeSolo") —
  * callers that need to restrict to the list validate on submit instead.
  *
- * <p>Keyboard: setas navegam, Enter escolhe o item em destaque e Tab também
- * escolhe <em>e já pula para o próximo campo</em> — mas só quando a escolha é
- * inequívoca (o usuário navegou com as setas, ou digitou o item inteiro).
- * Digitar um valor novo que apenas "casa por pedaço" com alguma sugestão e
- * dar Tab preserva o que foi digitado, senão um campo livre como Localização
- * trocaria "Caixa" por "Caixa 3" sem o usuário pedir.</p>
+ * <p>Keyboard: setas navegam, e tanto Enter quanto Tab escolhem o item em
+ * destaque — o Tab ainda leva o foco ao próximo campo, então cadastrar em
+ * lote é digitar, Tab, digitar, Tab. Em campos de texto livre
+ * ({@code freeSolo}), onde digitar um valor novo é normal, o Tab só confirma
+ * quando a escolha é inequívoca (navegou com as setas ou digitou o item
+ * inteiro); senão "Caixa" viraria "Caixa 3" sem ninguém pedir.</p>
  */
 export function TypeaheadInput({
   value,
@@ -57,6 +63,7 @@ export function TypeaheadInput({
   onBlur,
   inputRef,
   openOnFocus = true,
+  freeSolo = false,
   onMouseEnter,
   onMouseLeave,
   className,
@@ -134,13 +141,16 @@ export function TypeaheadInput({
         setActiveIdx((i) => Math.max(0, i - 1))
         break
       case 'Tab': {
-        // Tab confirma o item em destaque e deixa o próprio Tab levar o foco
-        // ao próximo campo (por isso NÃO chamamos preventDefault). Shift+Tab
-        // está voltando, então só fecha a lista.
+        // Tab confirma o item em destaque igual ao Enter e deixa o próprio Tab
+        // levar o foco ao próximo campo (por isso NÃO chamamos preventDefault).
+        // Shift+Tab está voltando, então só fecha a lista.
         const option = filtered[activeIdx]
         const typedTheWholeOption =
           option !== undefined && option.toLowerCase() === value.trim().toLowerCase()
-        if (!e.shiftKey && option !== undefined && (navigatedRef.current || typedTheWholeOption)) {
+        // Em campo livre, confirmar um "casou por pedaço" apagaria o valor novo
+        // que o usuário está digitando — aí só confirma se ele escolheu mesmo.
+        const unambiguous = !freeSolo || navigatedRef.current || typedTheWholeOption
+        if (!e.shiftKey && option !== undefined && unambiguous) {
           pick(option)
         } else {
           setOpen(false)
