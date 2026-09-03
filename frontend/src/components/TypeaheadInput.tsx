@@ -36,6 +36,13 @@ interface TypeaheadInputProps {
  * substring match) on every keystroke, capped to `limit` results. Any value
  * can be typed and kept even if it doesn't match an option ("freeSolo") —
  * callers that need to restrict to the list validate on submit instead.
+ *
+ * <p>Keyboard: setas navegam, Enter escolhe o item em destaque e Tab também
+ * escolhe <em>e já pula para o próximo campo</em> — mas só quando a escolha é
+ * inequívoca (o usuário navegou com as setas, ou digitou o item inteiro).
+ * Digitar um valor novo que apenas "casa por pedaço" com alguma sugestão e
+ * dar Tab preserva o que foi digitado, senão um campo livre como Localização
+ * trocaria "Caixa" por "Caixa 3" sem o usuário pedir.</p>
  */
 export function TypeaheadInput({
   value,
@@ -61,6 +68,9 @@ export function TypeaheadInput({
   const internalInputRef = useRef<HTMLInputElement>(null)
   const fieldRef = inputRef ?? internalInputRef
   const listRef = useRef<HTMLUListElement>(null)
+  // O usuário mexeu no destaque com as setas desde a última digitação?
+  // É o que separa "escolher com Tab" de "só sair do campo".
+  const navigatedRef = useRef(false)
 
   const filtered = useMemo(() => {
     const q = value.trim().toLowerCase()
@@ -98,6 +108,7 @@ export function TypeaheadInput({
     onChange(option)
     onSelect?.(option)
     setOpen(false)
+    navigatedRef.current = false
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -110,15 +121,33 @@ export function TypeaheadInput({
     switch (e.key) {
       case 'Escape':
         setOpen(false)
+        navigatedRef.current = false
         break
       case 'ArrowDown':
         e.preventDefault()
+        navigatedRef.current = true
         setActiveIdx((i) => Math.min(filtered.length - 1, i + 1))
         break
       case 'ArrowUp':
         e.preventDefault()
+        navigatedRef.current = true
         setActiveIdx((i) => Math.max(0, i - 1))
         break
+      case 'Tab': {
+        // Tab confirma o item em destaque e deixa o próprio Tab levar o foco
+        // ao próximo campo (por isso NÃO chamamos preventDefault). Shift+Tab
+        // está voltando, então só fecha a lista.
+        const option = filtered[activeIdx]
+        const typedTheWholeOption =
+          option !== undefined && option.toLowerCase() === value.trim().toLowerCase()
+        if (!e.shiftKey && option !== undefined && (navigatedRef.current || typedTheWholeOption)) {
+          pick(option)
+        } else {
+          setOpen(false)
+          navigatedRef.current = false
+        }
+        break
+      }
       case 'Enter':
         if (filtered[activeIdx] !== undefined) {
           e.preventDefault()
@@ -151,6 +180,7 @@ export function TypeaheadInput({
           onChange(e.target.value)
           setActiveIdx(0)
           setOpen(true)
+          navigatedRef.current = false
         }}
         onFocus={() => {
           if (openOnFocus) setOpen(true)
