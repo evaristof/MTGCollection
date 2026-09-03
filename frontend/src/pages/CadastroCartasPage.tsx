@@ -88,6 +88,9 @@ export default function CadastroCartasPage() {
   const [bulkAdding, setBulkAdding] = useState(false)
   const [numberLookup, setNumberLookup] = useState<'idle' | 'loading' | 'found' | 'notfound'>('idle')
 
+  // Foco volta para o nome depois de empilhar uma carta, para cadastrar o
+  // lote inteiro sem tirar a mão do teclado.
+  const nameInputRef = useRef<HTMLInputElement>(null)
   // (set|name) → reference image URL, or null when the catalog has none.
   // Keeps hovering the same card from re-querying the collector number.
   const previewCache = useRef<Map<string, string | null>>(new Map())
@@ -239,6 +242,7 @@ export default function CadastroCartasPage() {
     void lookupPrice(row)
     setForm((f) => nextForm(f))
     setNumberLookup('idle')
+    nameInputRef.current?.focus()
   }
 
   const patchRow = (id: string, patch: Partial<CardRow>) =>
@@ -363,6 +367,11 @@ export default function CadastroCartasPage() {
             >
               <TypeaheadInput
                 id="cc-name"
+                inputRef={nameInputRef}
+                // Catálogo grande: a lista abre ao digitar, não ao focar —
+                // senão, ao voltar o foco depois de "Adicionar", apareceriam
+                // 25 nomes quaisquer.
+                openOnFocus={false}
                 value={form.name}
                 onChange={onNameChange}
                 onSelect={(v) => void onNameSelect(v)}

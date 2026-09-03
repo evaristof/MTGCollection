@@ -13,6 +13,13 @@ interface TypeaheadInputProps {
   limit?: number
   onFocus?: () => void
   onBlur?: () => void
+  /** Ref do <input>, para o pai devolver o foco ao campo. */
+  inputRef?: React.RefObject<HTMLInputElement | null>
+  /**
+   * Abre a lista ao focar (padrão). Vale desligar em catálogos grandes, onde
+   * mostrar 25 nomes quaisquer só polui — digitar abre a lista do mesmo jeito.
+   */
+  openOnFocus?: boolean
   onMouseEnter?: () => void
   onMouseLeave?: () => void
   className?: string
@@ -41,6 +48,8 @@ export function TypeaheadInput({
   limit = 25,
   onFocus,
   onBlur,
+  inputRef,
+  openOnFocus = true,
   onMouseEnter,
   onMouseLeave,
   className,
@@ -49,7 +58,8 @@ export function TypeaheadInput({
   const [open, setOpen] = useState(false)
   const [activeIdx, setActiveIdx] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const internalInputRef = useRef<HTMLInputElement>(null)
+  const fieldRef = inputRef ?? internalInputRef
   const listRef = useRef<HTMLUListElement>(null)
 
   const filtered = useMemo(() => {
@@ -125,7 +135,7 @@ export function TypeaheadInput({
   return (
     <div className={`typeahead ${className ?? ''}`} ref={rootRef} style={style}>
       <input
-        ref={inputRef}
+        ref={fieldRef}
         id={id}
         type="text"
         role="combobox"
@@ -143,7 +153,7 @@ export function TypeaheadInput({
           setOpen(true)
         }}
         onFocus={() => {
-          setOpen(true)
+          if (openOnFocus) setOpen(true)
           onFocus?.()
         }}
         onBlur={onBlur}
