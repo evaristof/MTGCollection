@@ -7,7 +7,6 @@ import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.repository.MagicSetRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardIdentifier;
-import com.evaristof.mtgcollection.scryfall.dto.ScryfallPrices;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
@@ -339,6 +338,7 @@ public class CollectionImportService {
         String cardNumber = ctx.number;
         String cardType = ctx.cardType;
         BigDecimal price = ctx.price;
+        String comentario = ctx.comentario;
 
         if (!ctx.manualOverride) {
             String unresolvedReason = null;
@@ -354,7 +354,15 @@ public class CollectionImportService {
                 if (card != null) {
                     cardType = card.getTypeLine();
                     if (isBlank(cardNumber)) cardNumber = card.getCollectorNumber();
-                    price = priceFrom(card, ctx.foil);
+                    CardPriceResolver.Resolved resolvedPrice = CardPriceResolver.resolve(card, ctx.foil);
+                    price = resolvedPrice.price();
+                    if (price != null) {
+                        // Foil sem usd_foil vem em euro — o comentário gravado
+                        // no banco leva a marca (a planilha do usuário não é
+                        // alterada na coluna de comentário).
+                        comentario = CardPriceResolver.applyEurFoilNote(
+                                comentario, resolvedPrice.isEurFoilFallback());
+                    }
                 } else {
                     unresolvedReason = "Scryfall não retornou a carta para essa combinação de set/nome/número";
                 }
@@ -373,7 +381,7 @@ public class CollectionImportService {
         }
 
         persist(ctx.rowRef, ctx.cardName, ctx.setCode, ctx.setName, ctx.foil, ctx.quantity, cardType,
-                cardNumber, price, ctx.comentario, ctx.language, ctx.localizacao, job);
+                cardNumber, price, comentario, ctx.language, ctx.localizacao, job);
     }
 
     private String keyBySetAndNumber(String setCode, String collectorNumber) {
@@ -382,18 +390,6 @@ public class CollectionImportService {
 
     private String keyByNameAndSet(String setCode, String cardName) {
         return "c|" + normalize(setCode) + "|" + normalize(cardName);
-    }
-
-    private BigDecimal priceFrom(ScryfallCard card, boolean foil) {
-        if (card == null || card.getPrices() == null) return null;
-        ScryfallPrices prices = card.getPrices();
-        String raw = foil ? prices.getUsdFoil() : prices.getUsd();
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            return new BigDecimal(raw);
-        } catch (NumberFormatException e) {
-            return null;
-        }
     }
 
     private void persist(String rowRef,

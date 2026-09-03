@@ -36,6 +36,8 @@ interface CardRow extends CardFormState {
   addError?: string
   /** Preço consultado no Scryfall quando a linha entrou no lote. */
   price?: number | null
+  /** Moeda do preço: normalmente USD, EUR quando o foil só tem preço em euro. */
+  priceCurrency?: string
   priceStatus?: 'loading' | 'done' | 'error'
 }
 
@@ -49,11 +51,11 @@ const emptyForm = (): CardFormState => ({
   quantity: 1,
 })
 
-const formatMoney = (value: number | null | undefined): string => {
+const formatMoney = (value: number | null | undefined, currency = 'USD'): string => {
   if (value === null || value === undefined) return '-'
   return value.toLocaleString('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency,
     minimumFractionDigits: 2,
   })
 }
@@ -270,7 +272,8 @@ export default function CadastroCartasPage() {
       const res = row.number
         ? await api.priceByNumber(row.setCode, row.number, row.foil)
         : await api.priceByName(row.name, row.setCode, row.foil)
-      patchRow(row.id, { price: res.price, priceStatus: 'done' })
+      // A moeda vem do backend: foil sem usd_foil é cotado em eur_foil.
+      patchRow(row.id, { price: res.price, priceCurrency: res.currency, priceStatus: 'done' })
     } catch {
       // Carta sem preço no Scryfall, offline, etc. — a linha continua válida.
       patchRow(row.id, { price: null, priceStatus: 'error' })
@@ -348,7 +351,11 @@ export default function CadastroCartasPage() {
     if (row.price === null || row.price === undefined) {
       return <span className="muted">{row.priceStatus === 'error' ? 'sem preço' : '-'}</span>
     }
-    return formatMoney(row.price)
+    return (
+      <span title={row.priceCurrency === 'EUR' ? 'Sem preço em dólar; valor em euro' : undefined}>
+        {formatMoney(row.price, row.priceCurrency)}
+      </span>
+    )
   }
 
   return (
@@ -498,7 +505,7 @@ export default function CadastroCartasPage() {
                 <th>Foil</th>
                 <th>Localização</th>
                 <th>Qtd</th>
-                <th>Preço (US$)</th>
+                <th>Preço</th>
                 <th>Ações</th>
               </tr>
             </thead>

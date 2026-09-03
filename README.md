@@ -119,8 +119,10 @@ cd frontend && npm run lint && npm run build   # front-end
 
 | Método | Rota                                                       | Descrição                                                                  |
 |--------|------------------------------------------------------------|----------------------------------------------------------------------------|
-| GET    | `/api/prices/by-name?name=...&set=...&foil=true\|false`    | Preço USD pelo nome exato e código da coleção                              |
-| GET    | `/api/prices/by-number?set=...&number=...&foil=true\|false`| Preço USD pelo código da coleção e número do collector                     |
+| GET    | `/api/prices/by-name?name=...&set=...&foil=true\|false`    | Preço pelo nome exato e código da coleção (resposta traz `price` e `currency`) |
+| GET    | `/api/prices/by-number?set=...&number=...&foil=true\|false`| Preço pelo código da coleção e número do collector (idem)                  |
+
+**Preço de foil sem cotação em dólar:** algumas cartas foil não têm `usd_foil` no Scryfall, só `eur_foil`. Nesses casos o valor em euro é usado **sem conversão** e a carta recebe `Preço Foil em EUR` no comentário, para o número nunca ser lido como dólar sem aviso. A marca é gerenciada: é anexada ao fim do comentário (preservando o que você escreveu) e sai sozinha quando uma sincronização posterior encontra o preço em dólar. Vale em toda resolução de preço — adicionar carta, sincronizar, importar planilha e a consulta do Cadastro Cartas. Cartas não-foil sem `usd` continuam sem preço (o buraco é só do foil).
 | GET    | `/api/cards/by-name?name=...&set=...`                      | Objeto completo da carta no Scryfall (inclui `collector_number`, `type_line`, `prices`...) |
 
 ### Coleção

@@ -4,7 +4,6 @@ import com.evaristof.mtgcollection.domain.CollectionCard;
 import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
-import com.evaristof.mtgcollection.scryfall.dto.ScryfallPrices;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -86,13 +85,16 @@ public class CollectionCardService {
         String resolvedNumber = card.getCollectorNumber() != null ? card.getCollectorNumber()
                 : (byNumber ? collectorNumber.trim() : null);
         String resolvedName = card.getName() != null ? card.getName() : cardName;
-        BigDecimal price = priceFrom(card, foil);
+        CardPriceResolver.Resolved resolvedPrice = CardPriceResolver.resolve(card, foil);
+        BigDecimal price = resolvedPrice.price();
 
         CollectionCard existing = findStack(resolvedSet, resolvedNumber, resolvedName, foil, language, location);
         if (existing != null) {
             existing.setQuantity(existing.getQuantity() + quantity);
             if (price != null) {
                 existing.setPrice(price);
+                existing.setComentario(CardPriceResolver.applyEurFoilNote(
+                        existing.getComentario(), resolvedPrice.isEurFoilFallback()));
             }
             return repository.save(existing);
         }
@@ -106,6 +108,12 @@ public class CollectionCardService {
         entity.setLanguage(language);
         entity.setQuantity(quantity);
         entity.setPrice(price);
+        if (price != null) {
+            // Foil cujo preço veio em euro entra marcado, para o número não ser
+            // lido como dólar (ver CardPriceResolver).
+            entity.setComentario(CardPriceResolver.applyEurFoilNote(
+                    entity.getComentario(), resolvedPrice.isEurFoilFallback()));
+        }
         entity.setLocation(location);
         return repository.save(entity);
     }
@@ -288,9 +296,13 @@ public class CollectionCardService {
         if (card.getTypeLine() != null) {
             existing.setCardType(card.getTypeLine());
         }
-        BigDecimal price = priceFrom(card, existing.isFoil());
-        if (price != null) {
-            existing.setPrice(price);
+        CardPriceResolver.Resolved resolvedPrice = CardPriceResolver.resolve(card, existing.isFoil());
+        if (resolvedPrice.price() != null) {
+            existing.setPrice(resolvedPrice.price());
+            // A marca de preço em euro é gerenciada aqui: entra quando o preço
+            // veio de eur_foil e sai sozinha quando o dólar volta a existir.
+            existing.setComentario(CardPriceResolver.applyEurFoilNote(
+                    existing.getComentario(), resolvedPrice.isEurFoilFallback()));
         }
         if (isBlank(existing.getCardNumber()) && card.getCollectorNumber() != null) {
             existing.setCardNumber(card.getCollectorNumber());
@@ -307,15 +319,4 @@ public class CollectionCardService {
         return !isBlank(s);
     }
 
-    private static BigDecimal priceFrom(ScryfallCard card, boolean foil) {
-        if (card == null || card.getPrices() == null) return null;
-        ScryfallPrices prices = card.getPrices();
-        String raw = foil ? prices.getUsdFoil() : prices.getUsd();
-        if (raw == null || raw.isBlank()) return null;
-        try {
-            return new BigDecimal(raw);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
 }
