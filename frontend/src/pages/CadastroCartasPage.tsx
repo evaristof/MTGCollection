@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
+import { CardImageTooltip } from '../components/CardImageTooltip'
 import { SetCombo, type SetComboOption } from '../components/SetCombo'
 import { TypeaheadInput } from '../components/TypeaheadInput'
 import type { CardCatalogSetOption, Location, MagicSet } from '../types/mtg'
@@ -61,12 +62,6 @@ const nextForm = (prev: CardFormState): CardFormState => ({
   localizacao: prev.localizacao,
 })
 
-interface PreviewTarget {
-  setCode: string
-  name: string
-  number: string
-}
-
 export default function CadastroCartasPage() {
   const [form, setForm] = useState<CardFormState>(emptyForm())
   const [rows, setRows] = useState<CardRow[]>([])
@@ -81,9 +76,9 @@ export default function CadastroCartasPage() {
   const [bulkAdding, setBulkAdding] = useState(false)
   const [numberLookup, setNumberLookup] = useState<'idle' | 'loading' | 'found' | 'notfound'>('idle')
 
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  // (set|name) → reference image URL, or null when the catalog has none.
+  // Keeps hovering the same card from re-querying the collector number.
   const previewCache = useRef<Map<string, string | null>>(new Map())
-  const previewSeq = useRef(0)
 
   useEffect(() => {
     void (async () => {
@@ -158,59 +153,36 @@ export default function CadastroCartasPage() {
     }
   }
 
-  // --- Hover preview: shows the card image for the name/number under the mouse. ---
-  const showPreview = useCallback((target: PreviewTarget) => {
-    const setCode = target.setCode.trim()
-    const name = target.name.trim()
-    const number = target.number.trim()
-    if (!setCode || (!name && !number)) {
-      setPreviewUrl(null)
-      return
-    }
-    const seq = ++previewSeq.current
-    if (number) {
-      setPreviewUrl(api.scannerImageUrl(setCode, number))
-      return
-    }
-    const cacheKey = `${setCode}::${name.toLowerCase()}`
-    const cached = previewCache.current.get(cacheKey)
-    if (cached !== undefined) {
-      setPreviewUrl(cached)
-      return
-    }
-    setPreviewUrl(null)
-    void api
-      .cardCatalogResolveNumber(setCode, name)
-      .then((res) => {
-        const url = api.scannerImageUrl(setCode, res.collector_number)
+  /**
+   * Reference image for (set, name, number), as the list of face URLs the
+   * hover tooltip renders — empty when there is nothing to show.
+   *
+   * With a collector number the URL is built directly; without one we ask the
+   * catalog for a number for that (set, name) first.
+   */
+  const resolveCardImage = useCallback(
+    async (setCode: string, name: string, number: string): Promise<string[]> => {
+      const set = setCode.trim()
+      const num = number.trim()
+      const cardName = name.trim()
+      if (!set || (!cardName && !num)) return []
+      if (num) return [api.scannerImageUrl(set, num)]
+
+      const cacheKey = `${set}::${cardName.toLowerCase()}`
+      const cached = previewCache.current.get(cacheKey)
+      if (cached !== undefined) return cached ? [cached] : []
+      try {
+        const res = await api.cardCatalogResolveNumber(set, cardName)
+        const url = api.scannerImageUrl(set, res.collector_number)
         previewCache.current.set(cacheKey, url)
-        if (previewSeq.current === seq) setPreviewUrl(url)
-      })
-      .catch(() => {
+        return [url]
+      } catch {
         previewCache.current.set(cacheKey, null)
-        if (previewSeq.current === seq) setPreviewUrl(null)
-      })
-  }, [])
-
-  const hidePreview = useCallback(() => {
-    previewSeq.current++
-    setPreviewUrl(null)
-  }, [])
-
-  // --- Ensures a typed location the user hasn't seen before gets saved to
-  // the LOCATION catalog, so it shows up in the autocomplete right away. ---
-  const ensureLocationExists = async (name: string) => {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    if (locations.some((l) => l.name.toLowerCase() === trimmed.toLowerCase())) return
-    try {
-      const created = await api.createLocation({ name: trimmed })
-      setLocations((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
-    } catch {
-      // Already exists (race) or failed to save — non-critical, the value is
-      // still used for the card itself either way.
-    }
-  }
+        return []
+      }
+    },
+    [],
+  )
 
   const resolveLanguage = (value: string): string | null => {
     const trimmed = value.trim()
@@ -239,8 +211,6 @@ export default function CadastroCartasPage() {
       setError('Quantidade precisa ser >= 1.')
       return
     }
-
-    void ensureLocationExists(form.localizacao)
 
     const row: CardRow = {
       id: uid(),
@@ -304,6 +274,14 @@ export default function CadastroCartasPage() {
     // Clear out what succeeded; keep failures in place so they can be fixed
     // and retried without re-typing everything.
     setRows((prev) => prev.filter((r) => !r.added))
+    // Locations typed for the first time are created by the backend while
+    // saving the cards — pull the catalog again so they show up in the
+    // autocomplete right away.
+    try {
+      setLocations(await api.listLocations())
+    } catch {
+      // non-critical: the list just stays as it was
+    }
     setSummary(
       failed === 0
         ? `${ok} carta(s) adicionada(s) à coleção.`
@@ -327,22 +305,26 @@ export default function CadastroCartasPage() {
         <h3>Nova carta</h3>
         <p className="muted">
           Digite o nome (com autocomplete) ou o número da carta no set. Passe o mouse sobre o
-          nome ou número para ver a foto. Clique em <strong>Adicionar</strong> para empilhar a
-          carta abaixo, e em <strong>Adicionar à coleção</strong> quando terminar o lote.
+          nome ou número para ver a foto — use o <strong>scroll do mouse</strong> para dar zoom.
+          Clique em <strong>Adicionar</strong> para empilhar a carta abaixo, e em{' '}
+          <strong>Adicionar à coleção</strong> quando terminar o lote.
         </p>
         <div className="form__grid">
           <label>
             <span>Nome da carta</span>
-            <TypeaheadInput
-              id="cc-name"
-              value={form.name}
-              onChange={onNameChange}
-              onSelect={(v) => void onNameSelect(v)}
-              options={catalogNames}
-              placeholder="Lightning Bolt…"
-              onMouseEnter={() => showPreview({ setCode: form.setCode, name: form.name, number: form.number })}
-              onMouseLeave={hidePreview}
-            />
+            <CardImageTooltip
+              cardName={form.name}
+              resolveImageUrls={() => resolveCardImage(form.setCode, form.name, form.number)}
+            >
+              <TypeaheadInput
+                id="cc-name"
+                value={form.name}
+                onChange={onNameChange}
+                onSelect={(v) => void onNameSelect(v)}
+                options={catalogNames}
+                placeholder="Lightning Bolt…"
+              />
+            </CardImageTooltip>
           </label>
           <label>
             <span>Set{setOptionsForName != null ? ' (filtrado pela carta)' : ''}</span>
@@ -356,18 +338,21 @@ export default function CadastroCartasPage() {
           </label>
           <label>
             <span>Número (opcional)</span>
-            <input
-              value={form.number}
-              onChange={(e) => {
-                setForm((f) => ({ ...f, number: e.target.value }))
-                setNumberLookup('idle')
-              }}
-              onBlur={() => void onNumberBlur()}
-              onMouseEnter={() => showPreview({ setCode: form.setCode, name: form.name, number: form.number })}
-              onMouseLeave={hidePreview}
-              placeholder="ex: 123"
-              style={{ width: '100%', boxSizing: 'border-box' }}
-            />
+            <CardImageTooltip
+              cardName={form.name}
+              resolveImageUrls={() => resolveCardImage(form.setCode, form.name, form.number)}
+            >
+              <input
+                value={form.number}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, number: e.target.value }))
+                  setNumberLookup('idle')
+                }}
+                onBlur={() => void onNumberBlur()}
+                placeholder="ex: 123"
+                style={{ width: '100%', boxSizing: 'border-box' }}
+              />
+            </CardImageTooltip>
             {numberLookup === 'loading' && <span className="muted">buscando…</span>}
             {numberLookup === 'notfound' && <span className="muted">número não encontrado nesse set</span>}
           </label>
@@ -421,9 +406,10 @@ export default function CadastroCartasPage() {
       <div className="form">
         <h3>Cartas para cadastrar ({rows.length})</h3>
         <p className="muted">
-          Passe o mouse sobre o nome/número da linha para ver a foto. Use{' '}
-          <strong>Editar</strong> para corrigir uma linha ou <strong>Remover</strong> para
-          descartá-la.
+          Passe o mouse sobre o nome/número da linha para ver a foto (scroll do mouse dá zoom).
+          Use <strong>Editar</strong> para corrigir uma linha ou <strong>Remover</strong> para
+          descartá-la. Cartas idênticas que já estejam na coleção (mesmo set, número, linguagem,
+          foil e localização) somam na quantidade em vez de criar uma linha nova.
         </p>
         <div style={{ marginBottom: '0.75rem' }}>
           <button
@@ -525,22 +511,22 @@ export default function CadastroCartasPage() {
                 ) : (
                   <tr key={row.id}>
                     <td>{i + 1}</td>
-                    <td
-                      onMouseEnter={() =>
-                        showPreview({ setCode: row.setCode, name: row.name, number: row.number })
-                      }
-                      onMouseLeave={hidePreview}
-                    >
-                      {row.name || <span className="muted">—</span>}
+                    <td>
+                      <CardImageTooltip
+                        cardName={row.name}
+                        resolveImageUrls={() => resolveCardImage(row.setCode, row.name, row.number)}
+                      >
+                        {row.name || <span className="muted">—</span>}
+                      </CardImageTooltip>
                     </td>
                     <td>{row.setCode}</td>
-                    <td
-                      onMouseEnter={() =>
-                        showPreview({ setCode: row.setCode, name: row.name, number: row.number })
-                      }
-                      onMouseLeave={hidePreview}
-                    >
-                      {row.number || <span className="muted">—</span>}
+                    <td>
+                      <CardImageTooltip
+                        cardName={row.name}
+                        resolveImageUrls={() => resolveCardImage(row.setCode, row.name, row.number)}
+                      >
+                        {row.number || <span className="muted">—</span>}
+                      </CardImageTooltip>
                     </td>
                     <td>{row.language}</td>
                     <td style={{ textAlign: 'center' }}>{row.foil ? '✓' : ''}</td>
@@ -572,25 +558,6 @@ export default function CadastroCartasPage() {
           </table>
         )}
       </div>
-
-      {previewUrl && (
-        <img
-          src={previewUrl}
-          alt="Prévia da carta"
-          style={{
-            position: 'fixed',
-            top: 80,
-            right: 20,
-            maxWidth: 300,
-            maxHeight: 440,
-            borderRadius: 8,
-            boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
-            zIndex: 1000,
-            pointerEvents: 'none',
-            background: 'var(--bg, #fff)',
-          }}
-        />
-      )}
     </section>
   )
 }

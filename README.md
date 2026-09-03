@@ -127,7 +127,7 @@ cd frontend && npm run lint && npm run build   # front-end
 
 | Método | Rota                                                       | Descrição                                                                  |
 |--------|------------------------------------------------------------|----------------------------------------------------------------------------|
-| POST   | `/api/collection/cards`                                    | Adiciona carta à coleção (corpo: `card_name`, `set_code`, `foil`, `language`, `quantity`) |
+| POST   | `/api/collection/cards`                                    | Adiciona carta à coleção (corpo: `card_name`, `set_code`, `foil`, `language`, `quantity`, `localizacao`/`location_id`, `card_number`). Se já existir uma linha com o mesmo set + número (ou nome) + foil + linguagem + localização, **soma na quantidade** em vez de criar outra |
 | GET    | `/api/collection/cards[?set=...]`                          | Lista as cartas da coleção (opcional filtro por set)                       |
 | GET    | `/api/collection/cards/{id}`                               | Busca uma carta da coleção pelo id                                         |
 | PUT    | `/api/collection/cards/{id}`                               | Atualiza qty / foil / language (e opcionalmente name / set)                |
@@ -140,7 +140,9 @@ cd frontend && npm run lint && npm run build   # front-end
 | GET    | `/api/locations`                                           | Lista as localizações cadastradas (ordenadas por nome)                     |
 | POST   | `/api/locations`                                            | Cria uma localização (corpo: `name`, `description`; 409 se o nome já existir) |
 | PUT    | `/api/locations/{id}`                                       | Atualiza nome/descrição de uma localização                                 |
-| DELETE | `/api/locations/{id}`                                       | Remove uma localização                                                     |
+| DELETE | `/api/locations/{id}`                                       | Remove uma localização (409 enquanto houver cartas apontando para ela)     |
+
+As telas mandam a localização por **nome** (`localizacao`) tanto ao adicionar quanto ao editar uma carta; o backend resolve no catálogo `LOCATION` e cadastra na primeira vez que um nome aparece — por isso digitar uma localização nova em qualquer tela continua funcionando. `location_id` é aceito quando o cliente já sabe o id (422 se o id não existir), e `localizacao: ""` limpa a localização da carta.
 
 ### Catálogo de cartas (autocomplete da tela "Cadastro Cartas")
 
@@ -180,6 +182,9 @@ Tabela `COLLECTION_CARD`:
 | CARD_TYPE     | VARCHAR   | `type_line` do Scryfall                    |
 | LANGUAGE      | VARCHAR   | parâmetro                                  |
 | QUANTITY      | INT       | parâmetro                                  |
+| PRICE         | NUMERIC   | `prices.usd` / `prices.usd_foil`           |
+| COMENTARIO    | VARCHAR   | parâmetro                                  |
+| LOCATION_ID   | FK        | → `LOCATION.ID` (era a coluna livre `LOCALIZACAO`) |
 
 Tabela `LOCATION`:
 
@@ -189,11 +194,22 @@ Tabela `LOCATION`:
 | NAME          | VARCHAR   | parâmetro (único)                          |
 | DESCRIPTION   | VARCHAR   | parâmetro (opcional)                       |
 
+### Migração da localização (PostgreSQL)
+
+A localização das cartas era a coluna livre `COLLECTION_CARD.LOCALIZACAO` e agora é a FK `LOCATION_ID`. O Hibernate (`ddl-auto=update`) cria a tabela `LOCATION` e a coluna `LOCATION_ID` sozinho ao subir, mas **não** migra os dados nem remove a coluna antiga — para isso rode uma única vez:
+
+```bash
+psql -h localhost -U admin -d mtgdb \
+     -f backend/src/main/resources/db/migration/V4__migrate_localizacao_to_location_fk.sql
+```
+
+O script cria uma localização por valor distinto já usado (com `TRIM`, agrupando maiúsculas/minúsculas), vincula cada carta à sua localização, cria a FK + índice e só então remove `LOCALIZACAO` — abortando se alguma carta ficasse sem vínculo. É idempotente: rodar de novo depois da migração não faz nada. `COLLECTION_CARD_DATA_DUMP.LOCALIZACAO` continua texto livre de propósito, porque snapshot é histórico e não deve mudar quando uma localização é renomeada.
+
 ## Front-end
 
 O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um menu superior e duas telas de CRUD para gerenciar a coleção:
 
 - **Sets** — listar, criar, alterar, deletar + botão para sincronizar do Scryfall
 - **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set
-- **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número. "Adicionar" empilha a carta numa lista local editável; "Adicionar à coleção" grava tudo de uma vez
+- **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número, com zoom pelo scroll (mesmo tooltip da tela Cartas). "Adicionar" empilha a carta numa lista local editável; "Adicionar à coleção" grava tudo de uma vez, somando na quantidade quando a carta já existe na mesma localização
 - **Cadastro de Localização** — CRUD simples (nome + descrição) das localizações físicas usadas no autocomplete acima

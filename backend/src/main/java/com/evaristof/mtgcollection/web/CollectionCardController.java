@@ -1,7 +1,9 @@
 package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.CollectionCard;
+import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.service.CollectionCardService;
+import com.evaristof.mtgcollection.service.LocationService;
 import com.evaristof.mtgcollection.service.ScryfallLookupException;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
@@ -28,16 +30,25 @@ import java.util.List;
 public class CollectionCardController {
 
     private final CollectionCardService service;
+    private final LocationService locationService;
 
-    public CollectionCardController(CollectionCardService service) {
+    public CollectionCardController(CollectionCardService service, LocationService locationService) {
         this.service = service;
+        this.locationService = locationService;
     }
 
     @PostMapping
-    public ResponseEntity<CollectionCard> add(@Valid @RequestBody AddCardRequest req) {
+    public ResponseEntity<?> add(@Valid @RequestBody AddCardRequest req) {
+        Location location;
+        try {
+            location = locationService.resolve(req.locationId(), req.localizacao());
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("message", e.getMessage()));
+        }
         CollectionCard saved = service.addCardToCollection(
                 req.cardName(), req.setCode(), req.foil(), req.language(), req.quantity(),
-                req.localizacao(), req.cardNumber());
+                location, req.cardNumber());
         return ResponseEntity.ok(saved);
     }
 
@@ -56,12 +67,22 @@ public class CollectionCardController {
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<CollectionCard> update(@PathVariable("id") Long id,
-                                                 @Valid @RequestBody UpdateCardRequest req) {
+    public ResponseEntity<?> update(@PathVariable("id") Long id,
+                                    @Valid @RequestBody UpdateCardRequest req) {
+        // The location is only touched when the request mentions it at all:
+        // `location_id` set, or `localizacao` present ("" clears it).
+        boolean changeLocation = req.locationId() != null || req.localizacao() != null;
+        Location location;
+        try {
+            location = locationService.resolve(req.locationId(), req.localizacao());
+        } catch (java.util.NoSuchElementException e) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY)
+                    .body(java.util.Map.of("message", e.getMessage()));
+        }
         try {
             CollectionCard saved = service.update(
                     id, req.cardName(), req.setCode(), req.foil(), req.language(), req.quantity(),
-                    req.cardType(), req.price(), req.comentario(), req.localizacao());
+                    req.cardType(), req.price(), req.comentario(), location, changeLocation);
             return ResponseEntity.ok(saved);
         } catch (java.util.NoSuchElementException e) {
             return ResponseEntity.notFound().build();
@@ -115,7 +136,12 @@ public class CollectionCardController {
             boolean foil,
             @NotBlank String language,
             @Min(1) int quantity,
+            // Location NAME: resolved against the LOCATION catalog and created
+            // there on first use, so typing a brand-new location in any screen
+            // keeps working. Ignored when location_id is supplied.
             String localizacao,
+            // Explicit FK into the LOCATION catalog; 422 when unknown.
+            @JsonProperty("location_id") Long locationId,
             @JsonProperty("card_number") String cardNumber) {
     }
 
@@ -135,6 +161,9 @@ public class CollectionCardController {
             @JsonProperty("card_type") String cardType,
             BigDecimal price,
             String comentario,
-            String localizacao) {
+            // Location NAME ("" clears it); created on first use.
+            String localizacao,
+            // Explicit FK into the LOCATION catalog; 422 when unknown.
+            @JsonProperty("location_id") Long locationId) {
     }
 }

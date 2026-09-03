@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type AddCardInput } from '../api/client'
-import type { CollectionCard, MagicSet } from '../types/mtg'
+import type { CollectionCard, Location, MagicSet } from '../types/mtg'
 import { useTableControls } from '../hooks/useTableControls'
 import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
 import { SetCombo } from '../components/SetCombo'
+import { TypeaheadInput } from '../components/TypeaheadInput'
 import { ImportCollectionDialog } from '../components/ImportCollectionDialog'
 import { CardImageTooltip } from '../components/CardImageTooltip'
 
@@ -95,6 +96,7 @@ export default function CardsPage() {
   // Seleção em lote (ids de `CollectionCard`). O checkbox do header é um
   // master controlado pelo estado: checked quando todas as linhas visíveis
   // estão selecionadas, indeterminate quando apenas parte está.
+  const [locations, setLocations] = useState<Location[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
   const masterCheckboxRef = useRef<HTMLInputElement>(null)
@@ -144,6 +146,18 @@ export default function CardsPage() {
         /* ignore */
       })
   }, [])
+
+  useEffect(() => {
+    // location catalog for the "Localização" autocomplete — best-effort
+    void api
+      .listLocations()
+      .then(setLocations)
+      .catch(() => {
+        /* ignore */
+      })
+  }, [])
+
+  const locationNames = useMemo(() => locations.map((l) => l.name), [locations])
 
   const setOptions = useMemo(
     () =>
@@ -631,9 +645,14 @@ export default function CardsPage() {
           </label>
           <label>
             <span>Localização (opcional)</span>
-            <input
+            {/* Catálogo de localizações (tabela LOCATION); digitar um valor
+                novo também funciona — o backend cadastra na primeira vez. */}
+            <TypeaheadInput
+              id="add-localizacao"
               value={addForm.localizacao ?? ''}
-              onChange={(e) => setAddForm({ ...addForm, localizacao: e.target.value })}
+              onChange={(v) => setAddForm({ ...addForm, localizacao: v })}
+              onSelect={(v) => setAddForm({ ...addForm, localizacao: v })}
+              options={locationNames}
               placeholder="ex: Caixa 3"
             />
           </label>
@@ -729,9 +748,12 @@ export default function CardsPage() {
             </label>
             <label>
               <span>Localização</span>
-              <input
+              <TypeaheadInput
+                id="edit-localizacao"
                 value={editing.localizacao}
-                onChange={(e) => setEditing({ ...editing, localizacao: e.target.value })}
+                onChange={(v) => setEditing({ ...editing, localizacao: v })}
+                onSelect={(v) => setEditing({ ...editing, localizacao: v })}
+                options={locationNames}
                 placeholder="ex.: Caixa A / Página 3"
               />
             </label>

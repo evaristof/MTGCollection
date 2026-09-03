@@ -82,8 +82,14 @@ export interface AddCardInput {
   foil: boolean
   language: string
   quantity: number
-  /** Optional physical location; saved to the card if provided. */
+  /**
+   * Optional physical location, by NAME. The backend resolves it against the
+   * LOCATION catalog and creates the row the first time a name shows up, so
+   * typing a brand-new location works from any screen.
+   */
   localizacao?: string
+  /** Optional explicit FK into the location catalog (wins over `localizacao`). */
+  location_id?: number
   /**
    * Optional collector number. When set, the backend resolves the card by
    * (set, number) instead of by name — more precise (e.g. from the scanner).
@@ -110,7 +116,10 @@ export interface UpdateCardInput {
   card_type?: string
   price?: number | null
   comentario?: string
+  /** Location NAME; created on first use. `""` clears the card's location. */
   localizacao?: string
+  /** Explicit FK into the location catalog (wins over `localizacao`). */
+  location_id?: number
 }
 
 export const api = {

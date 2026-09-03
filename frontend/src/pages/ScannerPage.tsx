@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
-import type { MagicSet, ScannerMatchResult, ScannerSplitResult } from '../types/mtg'
+import type { Location, MagicSet, ScannerMatchResult, ScannerSplitResult } from '../types/mtg'
+import { TypeaheadInput } from '../components/TypeaheadInput'
 
 type RowStatus = 'scanning' | 'matched' | 'notfound' | 'error' | 'manual'
 
@@ -56,6 +57,7 @@ export default function ScannerPage() {
   const [bulkFiles, setBulkFiles] = useState<File[]>([])
   const [rows, setRows] = useState<ScanRow[]>([])
   const [sets, setSets] = useState<MagicSet[]>([])
+  const [locations, setLocations] = useState<Location[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -83,6 +85,11 @@ export default function ScannerPage() {
         setSets(await api.listSets())
       } catch {
         // ignore — set list stays empty (the select just won't be populated)
+      }
+      try {
+        setLocations(await api.listLocations())
+      } catch {
+        // ignore — the location autocomplete just won't have suggestions
       }
     })()
     return () => {
@@ -318,6 +325,8 @@ export default function ScannerPage() {
     ])
   }
 
+  const locationNames = useMemo(() => locations.map((l) => l.name), [locations])
+
   const hoveredRow = hovered ? rows.find((r) => r.id === hovered) : null
 
   // Live counter while a scan runs, total once it finishes.
@@ -499,11 +508,15 @@ export default function ScannerPage() {
                     />
                   </td>
                   <td>
-                    <input
+                    {/* Catálogo de localizações (tabela LOCATION); digitar um
+                        valor novo também funciona — o backend cadastra. */}
+                    <TypeaheadInput
                       value={row.localizacao}
                       placeholder="Caixa 3"
-                      onChange={(e) => patchRow(row.id, { localizacao: e.target.value })}
-                      style={{ width: 90 }}
+                      onChange={(v) => patchRow(row.id, { localizacao: v })}
+                      onSelect={(v) => patchRow(row.id, { localizacao: v })}
+                      options={locationNames}
+                      style={{ minWidth: 110 }}
                     />
                   </td>
                   <td>

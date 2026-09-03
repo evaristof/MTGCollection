@@ -1,6 +1,7 @@
 package com.evaristof.mtgcollection.service;
 
 import com.evaristof.mtgcollection.domain.CollectionCard;
+import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallPrices;
@@ -9,6 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 
 /**
  * Persists cards in the user's MTG collection.
@@ -42,13 +45,19 @@ public class CollectionCardService {
      * precise, and what the scanner provides; otherwise by ({@code cardName},
      * {@code setCode}). Collector number, type line and price all come from that
      * same Scryfall lookup.
+     *
+     * <p>Identical copies stack instead of duplicating: when the collection
+     * already has a row with the same set, collector number (or name, for rows
+     * stored without a number), foil, language and location, that row's
+     * {@code QUANTITY} grows by {@code quantity} and no new row is created.</p>
      */
+    @Transactional
     public CollectionCard addCardToCollection(String cardName,
                                               String setCode,
                                               boolean foil,
                                               String language,
                                               int quantity,
-                                              String localizacao,
+                                              Location location,
                                               String collectorNumber) {
         boolean byNumber = collectorNumber != null && !collectorNumber.isBlank();
         if (setCode == null || setCode.isBlank()) {
@@ -76,42 +85,69 @@ public class CollectionCardService {
         String resolvedSet = card.getSet() != null ? card.getSet() : setCode;
         String resolvedNumber = card.getCollectorNumber() != null ? card.getCollectorNumber()
                 : (byNumber ? collectorNumber.trim() : null);
-        String normLoc = normalizeLoc(localizacao);
+        String resolvedName = card.getName() != null ? card.getName() : cardName;
         BigDecimal price = priceFrom(card, foil);
 
-        // Merge into an existing identical stack (same set + number + foil +
-        // language + location) instead of creating a duplicate row.
-        if (resolvedNumber != null) {
-            CollectionCard existing = repository
-                    .findAllBySetCodeAndCardNumberAndFoilAndLanguage(resolvedSet, resolvedNumber, foil, language)
-                    .stream()
-                    .filter(c -> java.util.Objects.equals(normLoc, normalizeLoc(c.getLocalizacao())))
-                    .findFirst()
-                    .orElse(null);
-            if (existing != null) {
-                existing.setQuantity(existing.getQuantity() + quantity);
-                if (price != null) {
-                    existing.setPrice(price);
-                }
-                return repository.save(existing);
+        CollectionCard existing = findStack(resolvedSet, resolvedNumber, resolvedName, foil, language, location);
+        if (existing != null) {
+            existing.setQuantity(existing.getQuantity() + quantity);
+            if (price != null) {
+                existing.setPrice(price);
             }
+            return repository.save(existing);
         }
 
         CollectionCard entity = new CollectionCard();
         entity.setCardNumber(resolvedNumber);
-        entity.setCardName(card.getName() != null ? card.getName() : cardName);
+        entity.setCardName(resolvedName);
         entity.setSetCode(resolvedSet);
         entity.setFoil(foil);
         entity.setCardType(card.getTypeLine());
         entity.setLanguage(language);
         entity.setQuantity(quantity);
         entity.setPrice(price);
-        entity.setLocalizacao(normLoc);
+        entity.setLocation(location);
         return repository.save(entity);
     }
 
-    private static String normalizeLoc(String s) {
-        return (s == null || s.isBlank()) ? null : s.trim();
+    /**
+     * The stack this add should merge into, or {@code null} when the collection
+     * doesn't have this card under that exact identity yet.
+     *
+     * <p>Candidates are fetched keyed by (set, collector number, foil) — or by
+     * (set, name, foil) for cards stored without a collector number, e.g. from
+     * a spreadsheet import. Language and location are matched here rather than
+     * in the query: language case-insensitively (so "EN" stacks with "en") and
+     * location by FK id.</p>
+     */
+    private CollectionCard findStack(String setCode,
+                                     String cardNumber,
+                                     String cardName,
+                                     boolean foil,
+                                     String language,
+                                     Location location) {
+        List<CollectionCard> candidates;
+        if (cardNumber != null && !cardNumber.isBlank()) {
+            candidates = repository.findAllBySetCodeAndCardNumberAndFoil(setCode, cardNumber, foil);
+        } else if (cardName != null && !cardName.isBlank()) {
+            candidates = repository.findAllBySetCodeAndCardNameIgnoreCaseAndFoil(setCode, cardName, foil);
+        } else {
+            return null;
+        }
+        Long locationId = location != null ? location.getId() : null;
+        return candidates.stream()
+                .filter(c -> sameLanguage(language, c.getLanguage()))
+                .filter(c -> Objects.equals(locationId, c.getLocationId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static boolean sameLanguage(String a, String b) {
+        return Objects.equals(normalizeLanguage(a), normalizeLanguage(b));
+    }
+
+    private static String normalizeLanguage(String s) {
+        return (s == null || s.isBlank()) ? null : s.trim().toLowerCase(Locale.ROOT);
     }
 
     @Transactional(readOnly = true)
@@ -140,9 +176,13 @@ public class CollectionCardService {
      *       do not change; otherwise replace.</li>
      *   <li>{@code foil} / {@code language} / {@code quantity}: always
      *       replaced (required fields on the request).</li>
-     *   <li>{@code cardType} / {@code comentario} / {@code localizacao}:
-     *       {@code null} → do not change; empty string → clear
-     *       (persist {@code null}); otherwise replace (trimmed).</li>
+     *   <li>{@code cardType} / {@code comentario}: {@code null} → do not
+     *       change; empty string → clear (persist {@code null}); otherwise
+     *       replace (trimmed).</li>
+     *   <li>{@code location}: only touched when {@code changeLocation} is
+     *       {@code true} — then {@code null} clears the FK and any other value
+     *       replaces it. Callers resolve names to catalog rows beforehand
+     *       (see {@link LocationService#resolve}).</li>
      *   <li>{@code price}: {@code null} → do not change; otherwise
      *       replace (callers that wish to clear the price must fetch the
      *       row, null it out, then persist explicitly — we do not overload
@@ -160,7 +200,8 @@ public class CollectionCardService {
                                  String cardType,
                                  BigDecimal price,
                                  String comentario,
-                                 String localizacao) {
+                                 Location location,
+                                 boolean changeLocation) {
         if (language == null || language.isBlank()) {
             throw new IllegalArgumentException("language must not be blank");
         }
@@ -188,9 +229,8 @@ public class CollectionCardService {
             String trimmed = comentario.trim();
             existing.setComentario(trimmed.isEmpty() ? null : trimmed);
         }
-        if (localizacao != null) {
-            String trimmed = localizacao.trim();
-            existing.setLocalizacao(trimmed.isEmpty() ? null : trimmed);
+        if (changeLocation) {
+            existing.setLocation(location);
         }
         return repository.save(existing);
     }

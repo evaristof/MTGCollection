@@ -1,7 +1,7 @@
 package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.Location;
-import com.evaristof.mtgcollection.repository.LocationRepository;
+import com.evaristof.mtgcollection.service.LocationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
@@ -22,27 +22,27 @@ import java.util.Optional;
 /**
  * CRUD endpoints for the {@code LOCATION} table — the catalog of physical
  * storage locations (boxes, binders, shelves…) that feeds the location
- * autocomplete on "Cadastro Cartas" and backs the standalone "Cadastro de
- * Localização" screen.
+ * autocomplete on "Cadastro Cartas"/"Cartas" and backs the standalone
+ * "Cadastro de Localização" screen.
  */
 @RestController
 @RequestMapping("/api/locations")
 public class LocationController {
 
-    private final LocationRepository repository;
+    private final LocationService service;
 
-    public LocationController(LocationRepository repository) {
-        this.repository = repository;
+    public LocationController(LocationService service) {
+        this.service = service;
     }
 
     @GetMapping
     public List<Location> list() {
-        return repository.findAllByOrderByNameAsc();
+        return service.listAll();
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<Location> getOne(@PathVariable("id") Long id) {
-        return repository.findById(id)
+        return service.findById(id)
                 .map(ResponseEntity::ok)
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -50,42 +50,47 @@ public class LocationController {
     @PostMapping
     public ResponseEntity<?> create(@Valid @RequestBody LocationRequest req) {
         String name = req.name().trim();
-        if (repository.existsByNameIgnoreCase(name)) {
+        if (service.findByName(name).isPresent()) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("message", "Já existe uma localização com esse nome"));
         }
-        Location saved = repository.save(new Location(name, blankToNull(req.description())));
-        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(service.create(name, req.description()));
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<?> update(@PathVariable("id") Long id, @Valid @RequestBody LocationRequest req) {
-        Location existing = repository.findById(id).orElse(null);
+        Location existing = service.findById(id).orElse(null);
         if (existing == null) {
             return ResponseEntity.notFound().build();
         }
         String name = req.name().trim();
-        Optional<Location> dup = repository.findByNameIgnoreCase(name);
+        Optional<Location> dup = service.findByName(name);
         if (dup.isPresent() && !dup.get().getId().equals(id)) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("message", "Já existe uma localização com esse nome"));
         }
-        existing.setName(name);
-        existing.setDescription(blankToNull(req.description()));
-        return ResponseEntity.ok(repository.save(existing));
+        return ResponseEntity.ok(service.update(existing, name, req.description()));
     }
 
+    /**
+     * Removes a location. Refused with {@code 409} while cards still point at
+     * it — the FK would reject the delete anyway, and the count tells the user
+     * how many cards to move first.
+     */
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable("id") Long id) {
-        if (!repository.existsById(id)) {
+    public ResponseEntity<?> delete(@PathVariable("id") Long id) {
+        if (!service.exists(id)) {
             return ResponseEntity.notFound().build();
         }
-        repository.deleteById(id);
+        long inUse = service.countCards(id);
+        if (inUse > 0) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of(
+                    "message", "Localização em uso por " + inUse
+                            + " carta(s). Mova essas cartas antes de remover."));
+        }
+        service.delete(id);
         return ResponseEntity.noContent().build();
-    }
-
-    private static String blankToNull(String s) {
-        return (s == null || s.isBlank()) ? null : s.trim();
     }
 
     /** JSON body for create/update. */

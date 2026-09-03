@@ -2,8 +2,23 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '../api/client'
 
 interface Props {
-  cardId: number
+  /** Text rendered as the hover target when no `children` are given. */
   cardName: string
+  /**
+   * Collection card id — images are served by
+   * {@code /api/collection/cards/{id}/image} and the face count comes from
+   * {@code /image/info}. Mutually exclusive with `resolveImageUrls`.
+   */
+  cardId?: number
+  /**
+   * Image source for cards that are not in the collection (yet) — e.g. the
+   * "Cadastro Cartas" form, which previews the scanner's reference image by
+   * (set, collector number). Called on every hover; return an empty array
+   * when there is nothing to show.
+   */
+  resolveImageUrls?: () => Promise<string[]>
+  /** Custom hover target (an input, a table cell…). Defaults to `cardName`. */
+  children?: React.ReactNode
 }
 
 const MARGIN = 12
@@ -20,17 +35,21 @@ const CARD_ASPECT = 7 / 5
  * Repositions automatically to avoid being clipped by viewport edges.
  * Scroll the mouse wheel to zoom in/out.
  */
-export function CardImageTooltip({ cardId, cardName }: Props) {
+export function CardImageTooltip({ cardId, cardName, resolveImageUrls, children }: Props) {
   const [visible, setVisible] = useState(false)
   const [faceCount, setFaceCount] = useState(1)
   const [loadedFaces, setLoadedFaces] = useState<Set<number>>(new Set())
   const [erroredFaces, setErroredFaces] = useState<Set<number>>(new Set())
   const [zoom, setZoom] = useState(1)
   const [layout, setLayout] = useState('normal')
+  // Resolved URLs when `resolveImageUrls` is used: `null` = still resolving.
+  const [urls, setUrls] = useState<string[] | null>(null)
   const tooltipRef = useRef<HTMLDivElement>(null)
   const wrapperRef = useRef<HTMLSpanElement>(null)
   const faceCountFetched = useRef(false)
   const mousePos = useRef({ x: 0, y: 0 })
+  // Guards against a slow resolve landing after the pointer left / moved on.
+  const resolveSeq = useRef(0)
 
   const repositionTooltip = useCallback(() => {
     const el = tooltipRef.current
@@ -73,7 +92,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   useEffect(() => {
     if (!visible) return
     repositionTooltip()
-  }, [visible, zoom, repositionTooltip])
+  }, [visible, zoom, urls, repositionTooltip])
 
   useEffect(() => {
     if (!visible) return
@@ -92,7 +111,7 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
   }, [visible])
 
   useEffect(() => {
-    if (!visible || faceCountFetched.current) return
+    if (!visible || cardId == null || faceCountFetched.current) return
     api.cardImageInfo(cardId).then((info) => {
       faceCountFetched.current = true
       setFaceCount(info.face_count)
@@ -109,9 +128,24 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     setLoadedFaces(new Set())
     setErroredFaces(new Set())
     setZoom(1)
+    if (resolveImageUrls) {
+      // Resolved per hover: the card under the pointer changes as the user
+      // types, so there is nothing stable to cache at this level (callers
+      // that hit the network memoize it themselves).
+      setUrls(null)
+      const seq = ++resolveSeq.current
+      void resolveImageUrls()
+        .then((resolved) => {
+          if (resolveSeq.current === seq) setUrls(resolved)
+        })
+        .catch(() => {
+          if (resolveSeq.current === seq) setUrls([])
+        })
+    }
   }
 
   const onLeave = () => {
+    resolveSeq.current++
     setVisible(false)
   }
 
@@ -123,23 +157,32 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
     setErroredFaces((prev) => new Set(prev).add(face))
   }
 
+  const byUrl = resolveImageUrls != null
+  const resolving = byUrl && urls == null
+  const faces = byUrl ? (urls?.length ?? 0) : faceCount
   const isSplit = layout === 'split'
-  const isDoubleFaced = faceCount > 1
+  const isDoubleFaced = faces > 1
   const baseWidth = isDoubleFaced ? DUAL_WIDTH : SINGLE_WIDTH
   const imgWidth = Math.round(baseWidth * zoom)
   const imgHeight = Math.round(imgWidth * CARD_ASPECT)
   const rotatedW = isSplit ? imgHeight : imgWidth
   const rotatedH = isSplit ? imgWidth : imgHeight
+  const faceUrl = (face: number) =>
+    byUrl ? (urls?.[face] ?? '') : api.cardImageUrl(cardId as number, face)
+  // Nothing to show: no card selected yet, or no reference image for it.
+  const empty = byUrl && !resolving && faces === 0
 
   return (
     <span
       ref={wrapperRef}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
-      style={{ cursor: 'pointer' }}
+      // Wrapping a form field / table cell: behave like a block so the child
+      // keeps its own width. As a plain label it stays inline and hoverable.
+      style={children ? { display: 'block' } : { cursor: 'pointer' }}
     >
-      {cardName}
-      {visible && (
+      {children ?? cardName}
+      {visible && !empty && (
         <div
           ref={tooltipRef}
           style={{
@@ -157,59 +200,65 @@ export function CardImageTooltip({ cardId, cardName }: Props) {
             gap: 4,
           }}
         >
-          {Array.from({ length: faceCount }, (_, i) => (
-            <div
-              key={i}
-              style={{
-                position: 'relative',
-                width: rotatedW,
-                height: rotatedH,
-                overflow: 'hidden',
-              }}
-            >
-              {!loadedFaces.has(i) && !erroredFaces.has(i) && (
-                <div
-                  style={{
-                    color: 'var(--muted)',
-                    padding: '24px 16px',
-                    fontSize: 13,
-                  }}
-                >
-                  Carregando…
-                </div>
-              )}
-              {erroredFaces.has(i) && (
-                <div
-                  style={{
-                    color: 'var(--danger)',
-                    padding: '24px 16px',
-                    fontSize: 13,
-                  }}
-                >
-                  Imagem indisponível
-                </div>
-              )}
-              <img
-                src={api.cardImageUrl(cardId, i)}
-                alt={`${cardName}${isDoubleFaced ? ` (face ${i + 1})` : ''}`}
-                onLoad={() => onFaceLoad(i)}
-                onError={() => onFaceError(i)}
-                style={{
-                  display: loadedFaces.has(i) && !erroredFaces.has(i) ? 'block' : 'none',
-                  width: imgWidth,
-                  borderRadius: 6,
-                  transition: 'width 0.1s ease-out',
-                  ...(isSplit ? {
-                    transform: 'rotate(90deg)',
-                    transformOrigin: 'top left',
-                    position: 'absolute',
-                    top: 0,
-                    left: imgHeight,
-                  } : {}),
-                }}
-              />
+          {resolving && (
+            <div style={{ color: 'var(--muted)', padding: '24px 16px', fontSize: 13 }}>
+              Carregando…
             </div>
-          ))}
+          )}
+          {!resolving &&
+            Array.from({ length: faces }, (_, i) => (
+              <div
+                key={i}
+                style={{
+                  position: 'relative',
+                  width: rotatedW,
+                  height: rotatedH,
+                  overflow: 'hidden',
+                }}
+              >
+                {!loadedFaces.has(i) && !erroredFaces.has(i) && (
+                  <div
+                    style={{
+                      color: 'var(--muted)',
+                      padding: '24px 16px',
+                      fontSize: 13,
+                    }}
+                  >
+                    Carregando…
+                  </div>
+                )}
+                {erroredFaces.has(i) && (
+                  <div
+                    style={{
+                      color: 'var(--danger)',
+                      padding: '24px 16px',
+                      fontSize: 13,
+                    }}
+                  >
+                    Imagem indisponível
+                  </div>
+                )}
+                <img
+                  src={faceUrl(i)}
+                  alt={`${cardName}${isDoubleFaced ? ` (face ${i + 1})` : ''}`}
+                  onLoad={() => onFaceLoad(i)}
+                  onError={() => onFaceError(i)}
+                  style={{
+                    display: loadedFaces.has(i) && !erroredFaces.has(i) ? 'block' : 'none',
+                    width: imgWidth,
+                    borderRadius: 6,
+                    transition: 'width 0.1s ease-out',
+                    ...(isSplit ? {
+                      transform: 'rotate(90deg)',
+                      transformOrigin: 'top left',
+                      position: 'absolute',
+                      top: 0,
+                      left: imgHeight,
+                    } : {}),
+                  }}
+                />
+              </div>
+            ))}
         </div>
       )}
     </span>

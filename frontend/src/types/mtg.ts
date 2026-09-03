@@ -47,7 +47,10 @@ export interface CollectionCard {
   quantity: number
   price?: number | null
   comentario?: string | null
+  /** Location NAME, derived from the LOCATION_ID FK (read-only). */
   localizacao?: string | null
+  /** FK into the location catalog (`null` when the card has no location). */
+  location_id?: number | null
 }
 
 /**

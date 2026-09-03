@@ -36,6 +36,7 @@ class CollectionImportServiceTest {
     private CollectionCardRepository cardRepository;
     private MagicSetRepository setRepository;
     private SetPersistenceService setPersistenceService;
+    private LocationService locationService;
     private CollectionImportService service;
 
     @BeforeEach
@@ -44,8 +45,9 @@ class CollectionImportServiceTest {
         cardRepository = mock(CollectionCardRepository.class);
         setRepository = mock(MagicSetRepository.class);
         setPersistenceService = mock(SetPersistenceService.class);
+        locationService = mock(LocationService.class);
         service = new CollectionImportService(batchLookup, cardRepository, setRepository,
-                setPersistenceService, 0L);
+                setPersistenceService, locationService, 0L);
     }
 
     @Test

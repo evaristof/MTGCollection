@@ -1,7 +1,7 @@
 package com.evaristof.mtgcollection.web;
 
 import com.evaristof.mtgcollection.domain.Location;
-import com.evaristof.mtgcollection.repository.LocationRepository;
+import com.evaristof.mtgcollection.service.LocationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,9 +14,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -36,7 +39,7 @@ class LocationControllerTest {
     private ObjectMapper objectMapper;
 
     @MockBean
-    private LocationRepository repository;
+    private LocationService service;
 
     private static Location sample() {
         Location l = new Location("Caixa 3", "Cartas comuns");
@@ -46,18 +49,19 @@ class LocationControllerTest {
 
     @Test
     void list_returnsAllOrderedByName() throws Exception {
-        when(repository.findAllByOrderByNameAsc()).thenReturn(List.of(sample()));
+        when(service.listAll()).thenReturn(List.of(sample()));
 
         mockMvc.perform(get("/api/locations"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].name", is("Caixa 3")));
+                .andExpect(jsonPath("$[0].name", is("Caixa 3")))
+                .andExpect(jsonPath("$[0].description", is("Cartas comuns")));
     }
 
     @Test
     void create_savesAndReturns201() throws Exception {
-        when(repository.existsByNameIgnoreCase("Caixa 3")).thenReturn(false);
-        when(repository.save(any(Location.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(service.findByName("Caixa 3")).thenReturn(Optional.empty());
+        when(service.create(eq("Caixa 3"), any())).thenReturn(sample());
 
         String body = objectMapper.writeValueAsString(Map.of(
                 "name", "Caixa 3",
@@ -72,7 +76,7 @@ class LocationControllerTest {
 
     @Test
     void create_returns409WhenNameAlreadyExists() throws Exception {
-        when(repository.existsByNameIgnoreCase("Caixa 3")).thenReturn(true);
+        when(service.findByName("Caixa 3")).thenReturn(Optional.of(sample()));
 
         String body = objectMapper.writeValueAsString(Map.of("name", "Caixa 3"));
 
@@ -80,6 +84,7 @@ class LocationControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isConflict());
+        verify(service, never()).create(any(), any());
     }
 
     @Test
@@ -94,7 +99,7 @@ class LocationControllerTest {
 
     @Test
     void update_returns404WhenMissing() throws Exception {
-        when(repository.findById(1L)).thenReturn(Optional.empty());
+        when(service.findById(1L)).thenReturn(Optional.empty());
 
         String body = objectMapper.writeValueAsString(Map.of("name", "Caixa 4"));
 
@@ -106,11 +111,10 @@ class LocationControllerTest {
 
     @Test
     void update_returns409WhenRenamingToAnExistingName() throws Exception {
-        Location existing = sample();
         Location other = new Location("Caixa 4", null);
         other.setId(2L);
-        when(repository.findById(1L)).thenReturn(Optional.of(existing));
-        when(repository.findByNameIgnoreCase("Caixa 4")).thenReturn(Optional.of(other));
+        when(service.findById(1L)).thenReturn(Optional.of(sample()));
+        when(service.findByName("Caixa 4")).thenReturn(Optional.of(other));
 
         String body = objectMapper.writeValueAsString(Map.of("name", "Caixa 4"));
 
@@ -123,9 +127,11 @@ class LocationControllerTest {
     @Test
     void update_appliesFields() throws Exception {
         Location existing = sample();
-        when(repository.findById(1L)).thenReturn(Optional.of(existing));
-        when(repository.findByNameIgnoreCase("Caixa 3 renomeada")).thenReturn(Optional.empty());
-        when(repository.save(any(Location.class))).thenAnswer(inv -> inv.getArgument(0));
+        Location renamed = new Location("Caixa 3 renomeada", "nova descrição");
+        renamed.setId(1L);
+        when(service.findById(1L)).thenReturn(Optional.of(existing));
+        when(service.findByName("Caixa 3 renomeada")).thenReturn(Optional.empty());
+        when(service.update(existing, "Caixa 3 renomeada", "nova descrição")).thenReturn(renamed);
 
         String body = objectMapper.writeValueAsString(Map.of(
                 "name", "Caixa 3 renomeada",
@@ -140,17 +146,29 @@ class LocationControllerTest {
     }
 
     @Test
-    void delete_returns204WhenFound() throws Exception {
-        when(repository.existsById(1L)).thenReturn(true);
+    void delete_returns204WhenNotInUse() throws Exception {
+        when(service.exists(1L)).thenReturn(true);
+        when(service.countCards(1L)).thenReturn(0L);
 
         mockMvc.perform(delete("/api/locations/1"))
                 .andExpect(status().isNoContent());
-        verify(repository).deleteById(1L);
+        verify(service).delete(1L);
+    }
+
+    @Test
+    void delete_returns409WhileCardsStillPointAtIt() throws Exception {
+        when(service.exists(1L)).thenReturn(true);
+        when(service.countCards(1L)).thenReturn(7L);
+
+        mockMvc.perform(delete("/api/locations/1"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message", containsString("7 carta(s)")));
+        verify(service, never()).delete(1L);
     }
 
     @Test
     void delete_returns404WhenMissing() throws Exception {
-        when(repository.existsById(1L)).thenReturn(false);
+        when(service.exists(1L)).thenReturn(false);
 
         mockMvc.perform(delete("/api/locations/1"))
                 .andExpect(status().isNotFound());

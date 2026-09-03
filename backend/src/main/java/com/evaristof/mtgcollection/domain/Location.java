@@ -15,11 +15,11 @@ import java.util.Objects;
  * "Binder Vermelho").
  *
  * <p>This is the managed catalog behind the location autocomplete on the
- * "Cadastro Cartas" screen (and, going forward, "Cartas") and backs the
- * standalone "Cadastro de Localização" CRUD screen. {@link CollectionCard}
- * still stores the location as a free-text column ({@code LOCALIZACAO}) —
- * this table doesn't change that, it just gives the user a managed list of
- * suggestions instead of retyping the same values by hand every time.</p>
+ * "Cadastro Cartas" and "Cartas" screens, and it backs the standalone
+ * "Cadastro de Localização" CRUD screen. {@link CollectionCard} points here
+ * through its {@code LOCATION_ID} FK — it used to keep a free-text
+ * {@code LOCALIZACAO} column, migrated by
+ * {@code V4__migrate_localizacao_to_location_fk.sql}.</p>
  */
 @Entity
 @Table(name = "LOCATION", uniqueConstraints = @UniqueConstraint(columnNames = {"NAME"}))
