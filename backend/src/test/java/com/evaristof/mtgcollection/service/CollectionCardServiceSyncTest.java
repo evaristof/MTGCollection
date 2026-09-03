@@ -173,4 +173,46 @@ class CollectionCardServiceSyncTest {
         assertThatThrownBy(() -> service.syncCard(10L))
                 .isInstanceOf(ScryfallLookupException.class);
     }
+
+    @Test
+    void syncCard_foilWithoutUsdFoil_usesEurFoilAndMarksTheComment() {
+        CollectionCard existing = row("Sol Ring", "cmr", "1", true);
+        existing.setComentario("carta da caixa antiga");
+        when(repository.findById(10L)).thenReturn(Optional.of(existing));
+
+        ScryfallCard card = new ScryfallCard();
+        card.setName("Sol Ring");
+        ScryfallPrices prices = new ScryfallPrices();
+        prices.setUsd("1.00");
+        prices.setUsdFoil(null);
+        prices.setEurFoil("3.50");
+        card.setPrices(prices);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+
+        CollectionCard synced = service.syncCard(10L);
+
+        assertThat(synced.getPrice()).isEqualByComparingTo("3.50");
+        // o comentário do usuário é preservado e a marca entra no fim
+        assertThat(synced.getComentario()).isEqualTo("carta da caixa antiga · Preço Foil em EUR");
+    }
+
+    @Test
+    void syncCard_dropsTheEuroMarkOnceUsdFoilExists() {
+        CollectionCard existing = row("Sol Ring", "cmr", "1", true);
+        existing.setComentario("carta da caixa antiga · Preço Foil em EUR");
+        when(repository.findById(10L)).thenReturn(Optional.of(existing));
+
+        ScryfallCard card = new ScryfallCard();
+        card.setName("Sol Ring");
+        ScryfallPrices prices = new ScryfallPrices();
+        prices.setUsdFoil("7.25");
+        prices.setEurFoil("3.50");
+        card.setPrices(prices);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+
+        CollectionCard synced = service.syncCard(10L);
+
+        assertThat(synced.getPrice()).isEqualByComparingTo("7.25");
+        assertThat(synced.getComentario()).isEqualTo("carta da caixa antiga");
+    }
 }

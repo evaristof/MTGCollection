@@ -26,6 +26,20 @@ class CardPriceServiceTest {
         service = new CardPriceService(httpClient, new Gson());
     }
 
+    private static String cardJson(String usd, String usdFoil, String eurFoil) {
+        return "{"
+                + "\"object\":\"card\","
+                + "\"name\":\"Lightning Bolt\","
+                + "\"set\":\"2x2\","
+                + "\"prices\":{"
+                + (usd == null ? "\"usd\":null" : "\"usd\":\"" + usd + "\"")
+                + ","
+                + (usdFoil == null ? "\"usd_foil\":null" : "\"usd_foil\":\"" + usdFoil + "\"")
+                + ","
+                + (eurFoil == null ? "\"eur_foil\":null" : "\"eur_foil\":\"" + eurFoil + "\"")
+                + "}}";
+    }
+
     private static String cardJson(String usd, String usdFoil) {
         return "{"
                 + "\"object\":\"card\","
@@ -44,9 +58,9 @@ class CardPriceServiceTest {
     void getPriceByNameAndSet_nonFoil_returnsUsdPrice() throws Exception {
         when(httpClient.get(anyString())).thenReturn(cardJson("1.23", "5.67"));
 
-        BigDecimal price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", false);
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", false);
 
-        assertThat(price).isEqualByComparingTo("1.23");
+        assertThat(price.price()).isEqualByComparingTo("1.23");
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(httpClient).get(captor.capture());
         assertThat(captor.getValue())
@@ -59,36 +73,36 @@ class CardPriceServiceTest {
     void getPriceByNameAndSet_foil_returnsUsdFoilPrice() throws Exception {
         when(httpClient.get(anyString())).thenReturn(cardJson("1.23", "5.67"));
 
-        BigDecimal price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", true);
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", true);
 
-        assertThat(price).isEqualByComparingTo("5.67");
+        assertThat(price.price()).isEqualByComparingTo("5.67");
     }
 
     @Test
     void getPriceByNameAndSet_returnsNullWhenPriceMissing() throws Exception {
         when(httpClient.get(anyString())).thenReturn(cardJson(null, "5.67"));
 
-        BigDecimal price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", false);
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", false);
 
-        assertThat(price).isNull();
+        assertThat(price.price()).isNull();
     }
 
     @Test
     void getPriceByNameAndSet_returnsNullWhenPricesObjectMissing() throws Exception {
         when(httpClient.get(anyString())).thenReturn("{\"object\":\"card\",\"name\":\"x\"}");
 
-        BigDecimal price = service.getPriceByNameAndSet("x", "abc", false);
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("x", "abc", false);
 
-        assertThat(price).isNull();
+        assertThat(price.price()).isNull();
     }
 
     @Test
     void getPriceBySetAndNumber_buildsCorrectUrlAndReturnsPrice() throws Exception {
         when(httpClient.get(anyString())).thenReturn(cardJson("0.50", "2.00"));
 
-        BigDecimal price = service.getPriceBySetAndNumber("neo", "123", false);
+        CardPriceResolver.Resolved price = service.getPriceBySetAndNumber("neo", "123", false);
 
-        assertThat(price).isEqualByComparingTo("0.50");
+        assertThat(price.price()).isEqualByComparingTo("0.50");
         ArgumentCaptor<String> captor = ArgumentCaptor.forClass(String.class);
         verify(httpClient).get(captor.capture());
         assertThat(captor.getValue()).isEqualTo("/cards/neo/123");
@@ -98,9 +112,9 @@ class CardPriceServiceTest {
     void getPriceBySetAndNumber_foilReturnsFoilPrice() throws Exception {
         when(httpClient.get(anyString())).thenReturn(cardJson("0.50", "2.00"));
 
-        BigDecimal price = service.getPriceBySetAndNumber("neo", "123", true);
+        CardPriceResolver.Resolved price = service.getPriceBySetAndNumber("neo", "123", true);
 
-        assertThat(price).isEqualByComparingTo("2.00");
+        assertThat(price.price()).isEqualByComparingTo("2.00");
     }
 
     @Test
@@ -126,5 +140,26 @@ class CardPriceServiceTest {
         assertThatThrownBy(() -> service.getPriceByNameAndSet("x", "neo", false))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Failed to fetch card price");
+    }
+
+    @Test
+    void getPriceByNameAndSet_foilWithoutUsdFoil_fallsBackToEurFoil() throws Exception {
+        when(httpClient.get(anyString())).thenReturn(cardJson("1.23", null, "4.00"));
+
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", true);
+
+        assertThat(price.price()).isEqualByComparingTo("4.00");
+        assertThat(price.currency()).isEqualTo("EUR");
+        assertThat(price.isEurFoilFallback()).isTrue();
+    }
+
+    @Test
+    void getPriceByNameAndSet_nonFoilNeverFallsBackToEuro() throws Exception {
+        when(httpClient.get(anyString())).thenReturn(cardJson(null, null, "4.00"));
+
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", false);
+
+        assertThat(price.price()).isNull();
+        assertThat(price.currency()).isEqualTo("USD");
     }
 }
