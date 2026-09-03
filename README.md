@@ -133,6 +133,14 @@ cd frontend && npm run lint && npm run build   # front-end
 | PUT    | `/api/collection/cards/{id}`                               | Atualiza qty / foil / language (e opcionalmente name / set)                |
 | DELETE | `/api/collection/cards/{id}`                               | Remove a carta da coleção                                                  |
 
+### Reconciliação
+
+| Método | Rota                                                       | Descrição                                                                  |
+|--------|------------------------------------------------------------|------------------------------------------------------------------------------|
+| POST   | `/api/collection/reconcile`                                 | Recebe a planilha (multipart, campo `file`) e devolve as diferenças contra a coleção: `only_in_excel`, `only_in_collection`, `quantity_mismatch`, `ignored` e um `summary`. Somente leitura — nada é gravado |
+
+Comparação por **set + nome + foil + idioma + localização**. O número do coletor fica fora da chave porque a coluna é opcional na planilha (incluí-lo faria a mesma carta aparecer como faltando dos dois lados). Idiomas passam por um normalizador (`en` = `English`, `Espanhol` = `Spanish`…), sets são casados pelo código (caindo para o nome quando o set não está em `MAGIC_SET`), linhas repetidas da mesma chave são somadas dos dois lados, e a localização no formato `Pasta A (3) e Pasta B (5)` é expandida em uma entrada por pasta. Só as localizações citadas na planilha entram na comparação, para uma planilha parcial não listar o resto da coleção como sobra.
+
 ### Localizações
 
 | Método | Rota                                                       | Descrição                                                                  |
@@ -224,3 +232,4 @@ O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um 
 - **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set
 - **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número, com zoom pelo scroll (mesmo tooltip da tela Cartas). "Adicionar" empilha a carta numa lista local editável; "Adicionar à coleção" grava tudo de uma vez, somando na quantidade quando a carta já existe na mesma localização
 - **Cadastro de Localização** — CRUD simples (nome + descrição) das localizações físicas usadas no autocomplete acima
+- **Reconciliação Coleção** — importa a mesma planilha do "Importar coleção" e mostra três painéis de diferenças (só na planilha, só na base, quantidades diferentes), com ação por linha: cadastrar, apagar ou equalizar para a quantidade escolhida. A análise não grava nada; cada diferença é aplicada por você

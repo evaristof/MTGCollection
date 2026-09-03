@@ -6,6 +6,7 @@ import type {
   DataManagementStats,
   ImportJobSnapshot,
   Location,
+  ReconciliationResult,
   MagicSet,
   PriceMoversResponse,
   ScannerMatchResult,
@@ -200,6 +201,30 @@ export const api = {
     return request<PriceMoversResponse>(
       `/api/collection/datadumps/stats/price-movers${suffix}`,
     )
+  },
+
+  // Collection reconciliation: compares a spreadsheet against the registered
+  // collection and returns the differences (read-only — the screen applies
+  // each one through the normal cards API).
+  reconcileCollection: async (file: File): Promise<ReconciliationResult> => {
+    const body = new FormData()
+    body.append('file', file)
+    const res = await fetch(`${API_BASE_URL}/api/collection/reconcile`, {
+      method: 'POST',
+      body,
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      let message = `HTTP ${res.status}`
+      try {
+        const parsed = JSON.parse(text) as { message?: string }
+        if (parsed.message) message = parsed.message
+      } catch {
+        if (text) message = text
+      }
+      throw new Error(`Falha na reconciliação: ${message}`)
+    }
+    return (await res.json()) as ReconciliationResult
   },
 
   // Collection import (async)

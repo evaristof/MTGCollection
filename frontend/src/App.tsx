@@ -72,6 +72,10 @@ function App() {
             <span className="sidebar__icon" aria-hidden>📍</span>
             <span className="sidebar__label">Cadastro de Localização</span>
           </NavLink>
+          <NavLink to="/reconciliacao" title="Reconciliação Coleção">
+            <span className="sidebar__icon" aria-hidden>⚖️</span>
+            <span className="sidebar__label">Reconciliação Coleção</span>
+          </NavLink>
         </nav>
       </aside>
 
