@@ -89,8 +89,11 @@ export default function CadastroCartasPage() {
   const [numberLookup, setNumberLookup] = useState<'idle' | 'loading' | 'found' | 'notfound'>('idle')
 
   // Foco volta para o nome depois de empilhar uma carta, para cadastrar o
-  // lote inteiro sem tirar a mão do teclado.
+  // lote inteiro sem tirar a mão do teclado. O foco é pedido por um contador
+  // e aplicado num efeito: chamar focus() dentro do próprio clique acontece
+  // ANTES do React re-renderizar a lista/o formulário, e o foco se perdia.
   const nameInputRef = useRef<HTMLInputElement>(null)
+  const [focusNameRequest, setFocusNameRequest] = useState(0)
   // (set|name) → reference image URL, or null when the catalog has none.
   // Keeps hovering the same card from re-querying the collector number.
   const previewCache = useRef<Map<string, string | null>>(new Map())
@@ -111,6 +114,13 @@ export default function CadastroCartasPage() {
       }
     })()
   }, [])
+
+  useEffect(() => {
+    if (focusNameRequest === 0) return
+    const input =
+      nameInputRef.current ?? (document.getElementById('cc-name') as HTMLInputElement | null)
+    input?.focus()
+  }, [focusNameRequest])
 
   const fullSetOptions: SetComboOption[] = useMemo(
     () =>
@@ -242,7 +252,7 @@ export default function CadastroCartasPage() {
     void lookupPrice(row)
     setForm((f) => nextForm(f))
     setNumberLookup('idle')
-    nameInputRef.current?.focus()
+    setFocusNameRequest((n) => n + 1)
   }
 
   const patchRow = (id: string, patch: Partial<CardRow>) =>
