@@ -1,9 +1,11 @@
 import type {
+  CardCatalogSetOption,
   CardPrice,
   CollectionCard,
   DataJobSnapshot,
   DataManagementStats,
   ImportJobSnapshot,
+  Location,
   MagicSet,
   PriceMoversResponse,
   ScannerMatchResult,
@@ -328,6 +330,42 @@ export const api = {
 
   dataJob: (jobId: string) =>
     request<DataJobSnapshot>(`/api/data-management/jobs/${encodeURIComponent(jobId)}`),
+
+  // Locations (physical storage — boxes, binders…), backing the
+  // "Cadastro de Localização" screen and the location autocomplete on
+  // "Cadastro Cartas".
+  listLocations: () => request<Location[]>('/api/locations'),
+  createLocation: (body: { name: string; description?: string }) =>
+    request<Location>('/api/locations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateLocation: (id: number, body: { name: string; description?: string }) =>
+    request<Location>(`/api/locations/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteLocation: (id: number) =>
+    request<void>(`/api/locations/${id}`, { method: 'DELETE' }),
+
+  // Card catalog (from CARD_IMAGE_HASH) — fast-entry helpers for "Cadastro
+  // Cartas": name autocomplete, sets a card was printed in, and lookups
+  // between collector number and name.
+  cardCatalogNames: () => request<string[]>('/api/card-catalog/names'),
+  cardCatalogSets: (name: string) =>
+    request<CardCatalogSetOption[]>(`/api/card-catalog/sets?name=${encodeURIComponent(name)}`),
+  cardCatalogLookupNumber: (setCode: string, number: string) =>
+    request<{ card_name: string }>(
+      `/api/card-catalog/lookup-number?set=${encodeURIComponent(setCode)}&number=${encodeURIComponent(number)}`,
+    ),
+  cardCatalogResolveNumber: (setCode: string, name: string) =>
+    request<{ collector_number: string }>(
+      `/api/card-catalog/resolve-number?set=${encodeURIComponent(setCode)}&name=${encodeURIComponent(name)}`,
+    ),
+  // Image preview by (set, collector number) for cards not yet in the
+  // collection — same reference images the scanner uses.
+  scannerImageUrl: (setCode: string, number: string) =>
+    `${API_BASE_URL}/api/scanner/image/${encodeURIComponent(setCode)}/${encodeURIComponent(number)}`,
 
   // Requests cooperative cancellation of a running job (e.g. "finalizar
   // download"). The worker stops between cards and settles as CANCELLED.

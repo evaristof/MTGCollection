@@ -133,6 +133,26 @@ cd frontend && npm run lint && npm run build   # front-end
 | PUT    | `/api/collection/cards/{id}`                               | Atualiza qty / foil / language (e opcionalmente name / set)                |
 | DELETE | `/api/collection/cards/{id}`                               | Remove a carta da coleção                                                  |
 
+### Localizações
+
+| Método | Rota                                                       | Descrição                                                                  |
+|--------|------------------------------------------------------------|------------------------------------------------------------------------------|
+| GET    | `/api/locations`                                           | Lista as localizações cadastradas (ordenadas por nome)                     |
+| POST   | `/api/locations`                                            | Cria uma localização (corpo: `name`, `description`; 409 se o nome já existir) |
+| PUT    | `/api/locations/{id}`                                       | Atualiza nome/descrição de uma localização                                 |
+| DELETE | `/api/locations/{id}`                                       | Remove uma localização                                                     |
+
+### Catálogo de cartas (autocomplete da tela "Cadastro Cartas")
+
+Sourced from `CARD_IMAGE_HASH` (o catálogo de referência populado pela sincronização do scanner) — não faz chamadas ao Scryfall, então continua rápido ao cadastrar centenas de cartas em sequência.
+
+| Método | Rota                                                       | Descrição                                                                  |
+|--------|------------------------------------------------------------|------------------------------------------------------------------------------|
+| GET    | `/api/card-catalog/names`                                   | Todos os nomes de carta distintos (autocomplete do campo Nome)             |
+| GET    | `/api/card-catalog/sets?name=...`                            | Sets em que a carta foi impressa (filtra o combo de Set)                   |
+| GET    | `/api/card-catalog/lookup-number?set=...&number=...`         | Nome da carta impressa em (set, número) — preenche o campo Nome pelo número |
+| GET    | `/api/card-catalog/resolve-number?set=...&name=...`          | Um número de coleção para (set, nome) — usado na prévia da imagem          |
+
 ## Estrutura do banco
 
 Tabela `MAGIC_SET`:
@@ -161,9 +181,19 @@ Tabela `COLLECTION_CARD`:
 | LANGUAGE      | VARCHAR   | parâmetro                                  |
 | QUANTITY      | INT       | parâmetro                                  |
 
+Tabela `LOCATION`:
+
+| Coluna        | Tipo      | Origem                                     |
+|---------------|-----------|--------------------------------------------|
+| ID            | PK        | auto-gerado                                |
+| NAME          | VARCHAR   | parâmetro (único)                          |
+| DESCRIPTION   | VARCHAR   | parâmetro (opcional)                       |
+
 ## Front-end
 
 O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um menu superior e duas telas de CRUD para gerenciar a coleção:
 
 - **Sets** — listar, criar, alterar, deletar + botão para sincronizar do Scryfall
 - **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set
+- **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número. "Adicionar" empilha a carta numa lista local editável; "Adicionar à coleção" grava tudo de uma vez
+- **Cadastro de Localização** — CRUD simples (nome + descrição) das localizações físicas usadas no autocomplete acima

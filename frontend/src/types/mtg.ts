@@ -163,3 +163,21 @@ export interface CardPrice {
   currency: string
   price: number | null
 }
+
+/**
+ * A physical storage location for cards (GET/POST/PUT /api/locations).
+ */
+export interface Location {
+  id: number
+  name: string
+  description?: string | null
+}
+
+/**
+ * One entry in GET /api/card-catalog/sets?name=... — a set that contains a
+ * printing of the given card, sourced from the CARD_IMAGE_HASH catalog.
+ */
+export interface CardCatalogSetOption {
+  set_code: string
+  set_name: string
+}

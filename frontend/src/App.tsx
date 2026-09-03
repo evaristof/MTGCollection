@@ -56,6 +56,10 @@ function App() {
             <span className="sidebar__icon" aria-hidden>♦</span>
             <span className="sidebar__label">Cartas</span>
           </NavLink>
+          <NavLink to="/cadastro-cartas" title="Cadastro Cartas">
+            <span className="sidebar__icon" aria-hidden>➕</span>
+            <span className="sidebar__label">Cadastro Cartas</span>
+          </NavLink>
           <NavLink to="/charts" title="Gráficos">
             <span className="sidebar__icon" aria-hidden>📈</span>
             <span className="sidebar__label">Gráficos</span>
@@ -63,6 +67,10 @@ function App() {
           <NavLink to="/scanner" title="Scanner">
             <span className="sidebar__icon" aria-hidden>🔍</span>
             <span className="sidebar__label">Scanner</span>
+          </NavLink>
+          <NavLink to="/localizacoes" title="Cadastro de Localização">
+            <span className="sidebar__icon" aria-hidden>📍</span>
+            <span className="sidebar__label">Cadastro de Localização</span>
           </NavLink>
         </nav>
       </aside>
