@@ -184,3 +184,45 @@ export interface CardCatalogSetOption {
   set_code: string
   set_name: string
 }
+
+/**
+ * Uma diferença apontada pela tela Reconciliação Coleção
+ * (POST /api/collection/reconcile).
+ */
+export interface ReconciliationDiffRow {
+  card_name: string
+  /** `null` quando o set da planilha não existe na tabela MAGIC_SET. */
+  set_code: string | null
+  set_name: string | null
+  card_number: string | null
+  foil: boolean
+  /** Idioma canônico ("en" e "English" viram a mesma coisa). */
+  language: string
+  /** Idioma como está gravado na nossa linha — é o que um update precisa devolver. */
+  collection_language: string | null
+  location: string
+  excel_quantity: number
+  collection_quantity: number
+  /** Nossas linhas por trás dessa diferença (mais de uma quando há duplicatas). */
+  card_ids: number[]
+  /** Células da planilha por trás dessa diferença, ex.: "Blue!12". */
+  sheet_rows: string[]
+}
+
+export interface ReconciliationSummary {
+  sheet_rows: number
+  expanded_rows: number
+  matched: number
+  only_in_excel: number
+  only_in_collection: number
+  quantity_mismatch: number
+  locations: number
+}
+
+export interface ReconciliationResult {
+  only_in_excel: ReconciliationDiffRow[]
+  only_in_collection: ReconciliationDiffRow[]
+  quantity_mismatch: ReconciliationDiffRow[]
+  ignored: string[]
+  summary: ReconciliationSummary
+}

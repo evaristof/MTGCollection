@@ -11,6 +11,7 @@ import CadastroCartasPage from './pages/CadastroCartasPage.tsx'
 import ChartsPage from './pages/ChartsPage.tsx'
 import ScannerPage from './pages/ScannerPage.tsx'
 import LocationPage from './pages/LocationPage.tsx'
+import ReconciliacaoPage from './pages/ReconciliacaoPage.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -25,6 +26,7 @@ createRoot(document.getElementById('root')!).render(
           <Route path="charts" element={<ChartsPage />} />
           <Route path="scanner" element={<ScannerPage />} />
           <Route path="localizacoes" element={<LocationPage />} />
+          <Route path="reconciliacao" element={<ReconciliacaoPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
