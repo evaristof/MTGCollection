@@ -19,12 +19,18 @@ const rowKey = (d: ReconciliationDiffRow) =>
 
 const foilLabel = (foil: boolean) => (foil ? '✦' : '—')
 
-/** "Onslaught - ONS" — cai para o que existir quando falta nome ou código. */
+/**
+ * "Onslaught - ONS". Quando o set não está em MAGIC_SET o backend não tem um
+ * nome para devolver e manda o próprio código — nesse caso mostramos a sigla
+ * uma vez só, em vez de "ons - ONS".
+ */
 const setLabel = (d: ReconciliationDiffRow) => {
   const code = d.set_code?.trim()
   const name = d.set_name?.trim()
-  if (name && code) return `${name} - ${code.toUpperCase()}`
-  return name || code?.toUpperCase() || '-'
+  if (name && code && name.toLowerCase() !== code.toLowerCase()) {
+    return `${name} - ${code.toUpperCase()}`
+  }
+  return name && !code ? name : code?.toUpperCase() || name || '-'
 }
 
 export default function ReconciliacaoPage() {
