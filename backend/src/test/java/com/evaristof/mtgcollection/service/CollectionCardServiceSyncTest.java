@@ -215,4 +215,44 @@ class CollectionCardServiceSyncTest {
         assertThat(synced.getPrice()).isEqualByComparingTo("7.25");
         assertThat(synced.getComentario()).isEqualTo("carta da caixa antiga");
     }
+
+    @Test
+    void syncCard_foilWithoutUsdFoil_prefersUsdEtchedAndMarksTheComment() {
+        CollectionCard existing = row("Sol Ring", "cmr", "1", true);
+        when(repository.findById(10L)).thenReturn(Optional.of(existing));
+
+        ScryfallCard card = new ScryfallCard();
+        card.setName("Sol Ring");
+        ScryfallPrices prices = new ScryfallPrices();
+        prices.setUsdFoil(null);
+        prices.setUsdEtched("12.00");
+        prices.setEurFoil("3.50");
+        card.setPrices(prices);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+
+        CollectionCard synced = service.syncCard(10L);
+
+        // etched vem antes do euro na cadeia
+        assertThat(synced.getPrice()).isEqualByComparingTo("12.00");
+        assertThat(synced.getComentario()).isEqualTo("Carta Foil Etched");
+    }
+
+    @Test
+    void syncCard_swapsTheEuroMarkForTheEtchedOne() {
+        CollectionCard existing = row("Sol Ring", "cmr", "1", true);
+        existing.setComentario("carta da caixa antiga · Preço Foil em EUR");
+        when(repository.findById(10L)).thenReturn(Optional.of(existing));
+
+        ScryfallCard card = new ScryfallCard();
+        card.setName("Sol Ring");
+        ScryfallPrices prices = new ScryfallPrices();
+        prices.setUsdEtched("12.00");
+        prices.setEurFoil("3.50");
+        card.setPrices(prices);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+
+        CollectionCard synced = service.syncCard(10L);
+
+        assertThat(synced.getComentario()).isEqualTo("carta da caixa antiga · Carta Foil Etched");
+    }
 }

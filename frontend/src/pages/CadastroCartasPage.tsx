@@ -38,6 +38,8 @@ interface CardRow extends CardFormState {
   price?: number | null
   /** Moeda do preço: normalmente USD, EUR quando o foil só tem preço em euro. */
   priceCurrency?: string
+  /** Origem do preço quando não é o usd_foil esperado (etched, euro). */
+  priceNote?: string | null
   priceStatus?: 'loading' | 'done' | 'error'
 }
 
@@ -272,8 +274,15 @@ export default function CadastroCartasPage() {
       const res = row.number
         ? await api.priceByNumber(row.setCode, row.number, row.foil)
         : await api.priceByName(row.name, row.setCode, row.foil)
-      // A moeda vem do backend: foil sem usd_foil é cotado em eur_foil.
-      patchRow(row.id, { price: res.price, priceCurrency: res.currency, priceStatus: 'done' })
+      // Moeda e origem vêm do backend: foil sem usd_foil cai em usd_etched
+      // (dólar) ou eur_foil (euro), e a origem é a mesma marca que vai para o
+      // comentário da carta.
+      patchRow(row.id, {
+        price: res.price,
+        priceCurrency: res.currency,
+        priceNote: res.note ?? null,
+        priceStatus: 'done',
+      })
     } catch {
       // Carta sem preço no Scryfall, offline, etc. — a linha continua válida.
       patchRow(row.id, { price: null, priceStatus: 'error' })
@@ -352,8 +361,9 @@ export default function CadastroCartasPage() {
       return <span className="muted">{row.priceStatus === 'error' ? 'sem preço' : '-'}</span>
     }
     return (
-      <span title={row.priceCurrency === 'EUR' ? 'Sem preço em dólar; valor em euro' : undefined}>
+      <span title={row.priceNote ?? undefined}>
         {formatMoney(row.price, row.priceCurrency)}
+        {row.priceNote && <span className="muted"> ⓘ</span>}
       </span>
     )
   }

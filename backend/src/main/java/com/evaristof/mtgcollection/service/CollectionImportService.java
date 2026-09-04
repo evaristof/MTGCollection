@@ -357,11 +357,10 @@ public class CollectionImportService {
                     CardPriceResolver.Resolved resolvedPrice = CardPriceResolver.resolve(card, ctx.foil);
                     price = resolvedPrice.price();
                     if (price != null) {
-                        // Foil sem usd_foil vem em euro — o comentário gravado
-                        // no banco leva a marca (a planilha do usuário não é
-                        // alterada na coluna de comentário).
-                        comentario = CardPriceResolver.applyEurFoilNote(
-                                comentario, resolvedPrice.isEurFoilFallback());
+                        // Foil sem usd_foil vem de usd_etched ou eur_foil — o
+                        // comentário gravado no banco leva a marca (a planilha
+                        // do usuário não é alterada na coluna de comentário).
+                        comentario = CardPriceResolver.applyPriceNote(comentario, resolvedPrice);
                     }
                 } else {
                     unresolvedReason = "Scryfall não retornou a carta para essa combinação de set/nome/número";

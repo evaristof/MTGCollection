@@ -122,7 +122,13 @@ cd frontend && npm run lint && npm run build   # front-end
 | GET    | `/api/prices/by-name?name=...&set=...&foil=true\|false`    | Preço pelo nome exato e código da coleção (resposta traz `price` e `currency`) |
 | GET    | `/api/prices/by-number?set=...&number=...&foil=true\|false`| Preço pelo código da coleção e número do collector (idem)                  |
 
-**Preço de foil sem cotação em dólar:** algumas cartas foil não têm `usd_foil` no Scryfall, só `eur_foil`. Nesses casos o valor em euro é usado **sem conversão** e a carta recebe `Preço Foil em EUR` no comentário, para o número nunca ser lido como dólar sem aviso. A marca é gerenciada: é anexada ao fim do comentário (preservando o que você escreveu) e sai sozinha quando uma sincronização posterior encontra o preço em dólar. Vale em toda resolução de preço — adicionar carta, sincronizar, importar planilha e a consulta do Cadastro Cartas. Cartas não-foil sem `usd` continuam sem preço (o buraco é só do foil).
+**Preço de foil sem `usd_foil`:** nem toda carta foil tem cotação na chave "normal" do Scryfall, então o preço do foil segue uma cadeia:
+
+1. `usd_foil` — o caso comum, sem marca nenhuma;
+2. `usd_etched` — foil etched, cotada só nessa chave: usa o valor (em dólar) e marca `Carta Foil Etched` no comentário;
+3. `eur_foil` — sem dólar nenhum: usa o euro **sem conversão** e marca `Preço Foil em EUR`, para o número nunca ser lido como dólar sem aviso.
+
+As marcas são gerenciadas: entram no fim do comentário (preservando o que você escreveu), não duplicam, trocam entre si e somem sozinhas conforme a fonte do preço muda de uma sincronização para outra. Vale em toda resolução de preço — adicionar carta, sincronizar, importar planilha e a consulta do Cadastro Cartas, cuja resposta traz `price`, `currency` e `note`. Cartas não-foil sem `usd` continuam sem preço (o buraco é só do foil).
 | GET    | `/api/cards/by-name?name=...&set=...`                      | Objeto completo da carta no Scryfall (inclui `collector_number`, `type_line`, `prices`...) |
 
 ### Coleção
