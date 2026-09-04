@@ -233,3 +233,18 @@ export interface ReconciliationResult {
   ignored: string[]
   summary: ReconciliationSummary
 }
+
+/**
+ * Valor atual da coleção somado por localização
+ * (GET /api/collection/stats/value-by-location).
+ */
+export interface LocationValue {
+  /** `null` nas cartas sem localização. */
+  location: string | null
+  /** Soma de preço × quantidade. */
+  total_value: number
+  /** Número de cópias. */
+  total_quantity: number
+  /** Número de linhas da coleção. */
+  card_count: number
+}

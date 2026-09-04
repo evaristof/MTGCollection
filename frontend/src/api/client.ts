@@ -6,6 +6,7 @@ import type {
   DataManagementStats,
   ImportJobSnapshot,
   Location,
+  LocationValue,
   ReconciliationResult,
   MagicSet,
   PriceMoversResponse,
@@ -167,6 +168,10 @@ export const api = {
     request<void>(`/api/collection/cards/${id}`, { method: 'DELETE' }),
   syncCard: (id: number) =>
     request<CollectionCard>(`/api/collection/cards/${id}/sync`, { method: 'POST' }),
+
+  // Agregados da coleção atual (os históricos ficam nos data dumps)
+  collectionValueByLocation: () =>
+    request<LocationValue[]>('/api/collection/stats/value-by-location'),
 
   // Collection data dumps (point-in-time snapshots of the collection)
   createCollectionDump: () =>
