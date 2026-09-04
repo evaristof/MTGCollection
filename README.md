@@ -142,6 +142,12 @@ As marcas são gerenciadas: entram no fim do comentário (preservando o que voc�
 | DELETE | `/api/collection/cards/{id}`                               | Remove a carta da coleção                                                  |
 | GET    | `/api/collection/export`                                    | Baixa a coleção inteira como .xlsx no mesmo layout que o importador lê (set pelo nome, foil como Sim/Não, coluna H com a fórmula preço × quantidade) |
 
+### Estatísticas da coleção
+
+| Método | Rota                                                       | Descrição                                                                  |
+|--------|------------------------------------------------------------|------------------------------------------------------------------------------|
+| GET    | `/api/collection/stats/value-by-location`                   | Valor atual (`preço × quantidade`) somado por localização, com número de cópias e de linhas; cartas sem localização vêm num grupo com `location: null` |
+
 ### Reconciliação
 
 | Método | Rota                                                       | Descrição                                                                  |
@@ -239,6 +245,7 @@ O front-end fica em [`frontend/`](./frontend) (React + Vite + TS). A UI traz um 
 
 - **Sets** — listar, criar, alterar, deletar + botão para sincronizar do Scryfall
 - **Cartas** — listar, adicionar (busca automática no Scryfall pra popular número/tipo), alterar (`foil`/`language`/`quantity`), deletar, filtrar por set, importar e **exportar** a coleção na planilha do template
+- **Gráficos** — valor total da coleção ao longo dos snapshots, maiores variações de preço e o painel **Valor por localização** (quanto vale hoje o que está guardado em cada pasta/caixa, com barras, percentual do total e quantidades)
 - **Cadastro Cartas** — cadastro rápido em lote: nome com autocomplete (baseado em `CARD_IMAGE_HASH`), set filtrado pela carta escolhida, número opcional (preenche o nome), linguagem, foil, localização (autocomplete com opção de digitar uma nova) e prévia da imagem ao passar o mouse sobre nome/número, com zoom pelo scroll (mesmo tooltip da tela Cartas). "Adicionar" empilha a carta numa lista local editável — já com o preço consultado no Scryfall — e "Adicionar à coleção" grava tudo de uma vez, somando na quantidade quando a carta já existe na mesma localização
 - **Cadastro de Localização** — CRUD simples (nome + descrição) das localizações físicas usadas no autocomplete acima
 - **Reconciliação Coleção** — importa a mesma planilha do "Importar coleção" e mostra três painéis de diferenças (só na planilha, só na base, quantidades diferentes), com ação por linha: cadastrar, apagar ou equalizar para a quantidade escolhida. A análise não grava nada; cada diferença é aplicada por você

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
+  LabelList,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -10,7 +13,7 @@ import {
 } from 'recharts'
 import * as XLSX from 'xlsx'
 import { api } from '../api/client'
-import type { CardMover, PriceMoversResponse } from '../types/mtg'
+import type { CardMover, LocationValue, PriceMoversResponse } from '../types/mtg'
 import { CardImageTooltip } from '../components/CardImageTooltip'
 
 interface DumpTotalPoint {
@@ -84,17 +87,24 @@ export default function ChartsPage() {
   const [points, setPoints] = useState<DumpTotalPoint[]>([])
   const [movers, setMovers] = useState<PriceMoversResponse | null | undefined>(null)
   const [exporting, setExporting] = useState(false)
+  const [byLocation, setByLocation] = useState<LocationValue[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const params = { from: from.trim() || undefined, to: to.trim() || undefined }
-      const [rows, moversResult] = await Promise.all([
+      const [rows, moversResult, locationRows] = await Promise.all([
         api.dumpTotalValues(params),
         api.dumpPriceMovers(params).catch((e) => {
           console.error('dumpPriceMovers failed:', e)
           return undefined
+        }),
+        // Valor por localização é da coleção ATUAL — não depende do intervalo
+        // e não pode derrubar o resto da tela se falhar.
+        api.collectionValueByLocation().catch((e) => {
+          console.error('collectionValueByLocation failed:', e)
+          return [] as LocationValue[]
         }),
       ])
       setPoints(
@@ -104,6 +114,7 @@ export default function ChartsPage() {
         })),
       )
       setMovers(moversResult ?? null)
+      setByLocation(locationRows)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -301,7 +312,147 @@ export default function ChartsPage() {
           )}
         </>
       )}
+      <LocationValuePanel rows={byLocation} loading={loading} />
     </section>
+  )
+}
+
+const NO_LOCATION_LABEL = '(sem localização)'
+
+/**
+ * "Valor por localização" — quanto vale hoje o que está guardado em cada
+ * pasta/caixa. Barras horizontais porque os nomes das localizações são
+ * longos e a comparação é de magnitude; uma cor só, já que a identidade de
+ * cada barra já está no eixo (colorir por localização não acrescentaria
+ * informação nenhuma). A tabela ao lado dá os números exatos.
+ */
+function LocationValuePanel({ rows, loading }: { rows: LocationValue[]; loading: boolean }) {
+  const data = useMemo(
+    () =>
+      rows.map((r) => ({
+        label: r.location ?? NO_LOCATION_LABEL,
+        value: Number(r.total_value),
+        quantity: r.total_quantity,
+        cards: r.card_count,
+      })),
+    [rows],
+  )
+
+  const totals = useMemo(
+    () =>
+      data.reduce(
+        (acc, r) => ({
+          value: acc.value + r.value,
+          quantity: acc.quantity + r.quantity,
+          cards: acc.cards + r.cards,
+        }),
+        { value: 0, quantity: 0, cards: 0 },
+      ),
+    [data],
+  )
+
+  return (
+    <div className="form" style={{ marginTop: 24 }}>
+      <h3>Valor por localização</h3>
+      <p className="muted">
+        Soma de <code>preço × quantidade</code> das cartas guardadas em cada localização, na
+        coleção <strong>atual</strong> — este painel não depende do intervalo de datas acima.
+        Cartas sem preço entram como zero e continuam contando nas quantidades.
+      </p>
+
+      {data.length === 0 ? (
+        <p className="muted">
+          {loading
+            ? 'Carregando…'
+            : 'Nenhuma carta cadastrada ainda — o valor por localização aparece aqui assim que a coleção tiver cartas.'}
+        </p>
+      ) : (
+        <>
+          <ul
+            className="muted"
+            style={{ listStyle: 'none', padding: 0, display: 'flex', gap: 16, flexWrap: 'wrap' }}
+          >
+            <li><strong>Total:</strong> {formatMoney(totals.value)}</li>
+            <li><strong>Localizações:</strong> {data.length}</li>
+            <li><strong>Cópias:</strong> {totals.quantity}</li>
+            <li><strong>Linhas:</strong> {totals.cards}</li>
+          </ul>
+
+          <div style={{ width: '100%', height: Math.max(180, data.length * 44 + 48) }}>
+            <ResponsiveContainer>
+              <BarChart
+                data={data}
+                layout="vertical"
+                margin={{ top: 8, right: 96, left: 8, bottom: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" horizontal={false} />
+                <XAxis
+                  type="number"
+                  tick={{ fontSize: 12 }}
+                  tickFormatter={(v: number) =>
+                    v.toLocaleString('en-US', { maximumFractionDigits: 0 })
+                  }
+                />
+                <YAxis
+                  type="category"
+                  dataKey="label"
+                  tick={{ fontSize: 12 }}
+                  width={190}
+                  interval={0}
+                />
+                <Tooltip
+                  formatter={(v) => [formatMoney(Number(v)), 'Valor']}
+                  labelFormatter={(label) => String(label)}
+                />
+                <Bar
+                  dataKey="value"
+                  name="Valor"
+                  fill="#1976d2"
+                  radius={[0, 4, 4, 0]}
+                  isAnimationActive={false}
+                >
+                  <LabelList
+                    dataKey="value"
+                    position="right"
+                    formatter={(v) => (v == null ? '' : formatMoney(Number(v)))}
+                    style={{ fontSize: 12, fill: 'var(--fg-soft, #555)' }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="table-wrapper" style={{ marginTop: 12 }}>
+            <table style={{ minWidth: 'auto' }}>
+              <thead>
+                <tr>
+                  <th>Localização</th>
+                  <th>Valor (US$)</th>
+                  <th>% do total</th>
+                  <th>Cópias</th>
+                  <th>Linhas</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.map((r) => (
+                  <tr key={r.label}>
+                    <td>{r.label}</td>
+                    <td>{formatMoney(r.value)}</td>
+                    <td>
+                      {totals.value > 0
+                        ? `${((r.value / totals.value) * 100).toFixed(1)}%`
+                        : '—'}
+                    </td>
+                    <td>{r.quantity}</td>
+                    <td>{r.cards}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   )
 }
 
