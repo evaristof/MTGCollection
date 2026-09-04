@@ -93,8 +93,8 @@ public class CollectionCardService {
             existing.setQuantity(existing.getQuantity() + quantity);
             if (price != null) {
                 existing.setPrice(price);
-                existing.setComentario(CardPriceResolver.applyEurFoilNote(
-                        existing.getComentario(), resolvedPrice.isEurFoilFallback()));
+                existing.setComentario(CardPriceResolver.applyPriceNote(
+                        existing.getComentario(), resolvedPrice));
             }
             return repository.save(existing);
         }
@@ -109,10 +109,10 @@ public class CollectionCardService {
         entity.setQuantity(quantity);
         entity.setPrice(price);
         if (price != null) {
-            // Foil cujo preço veio em euro entra marcado, para o número não ser
-            // lido como dólar (ver CardPriceResolver).
-            entity.setComentario(CardPriceResolver.applyEurFoilNote(
-                    entity.getComentario(), resolvedPrice.isEurFoilFallback()));
+            // Foil cotada em etched ou em euro entra marcada, para o número não
+            // ser lido como um usd_foil qualquer (ver CardPriceResolver).
+            entity.setComentario(CardPriceResolver.applyPriceNote(
+                    entity.getComentario(), resolvedPrice));
         }
         entity.setLocation(location);
         return repository.save(entity);
@@ -299,10 +299,11 @@ public class CollectionCardService {
         CardPriceResolver.Resolved resolvedPrice = CardPriceResolver.resolve(card, existing.isFoil());
         if (resolvedPrice.price() != null) {
             existing.setPrice(resolvedPrice.price());
-            // A marca de preço em euro é gerenciada aqui: entra quando o preço
-            // veio de eur_foil e sai sozinha quando o dólar volta a existir.
-            existing.setComentario(CardPriceResolver.applyEurFoilNote(
-                    existing.getComentario(), resolvedPrice.isEurFoilFallback()));
+            // As marcas de origem do preço são gerenciadas aqui: entram, trocam
+            // entre si e somem sozinhas conforme a fonte muda entre uma
+            // sincronização e outra.
+            existing.setComentario(CardPriceResolver.applyPriceNote(
+                    existing.getComentario(), resolvedPrice));
         }
         if (isBlank(existing.getCardNumber()) && card.getCollectorNumber() != null) {
             existing.setCardNumber(card.getCollectorNumber());

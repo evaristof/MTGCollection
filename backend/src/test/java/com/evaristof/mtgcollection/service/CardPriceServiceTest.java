@@ -26,6 +26,22 @@ class CardPriceServiceTest {
         service = new CardPriceService(httpClient, new Gson());
     }
 
+    private static String cardJson(String usd, String usdFoil, String usdEtched, String eurFoil) {
+        return "{"
+                + "\"object\":\"card\","
+                + "\"name\":\"Lightning Bolt\","
+                + "\"set\":\"2x2\","
+                + "\"prices\":{"
+                + (usd == null ? "\"usd\":null" : "\"usd\":\"" + usd + "\"")
+                + ","
+                + (usdFoil == null ? "\"usd_foil\":null" : "\"usd_foil\":\"" + usdFoil + "\"")
+                + ","
+                + (usdEtched == null ? "\"usd_etched\":null" : "\"usd_etched\":\"" + usdEtched + "\"")
+                + ","
+                + (eurFoil == null ? "\"eur_foil\":null" : "\"eur_foil\":\"" + eurFoil + "\"")
+                + "}}";
+    }
+
     private static String cardJson(String usd, String usdFoil, String eurFoil) {
         return "{"
                 + "\"object\":\"card\","
@@ -150,7 +166,7 @@ class CardPriceServiceTest {
 
         assertThat(price.price()).isEqualByComparingTo("4.00");
         assertThat(price.currency()).isEqualTo("EUR");
-        assertThat(price.isEurFoilFallback()).isTrue();
+        assertThat(price.note()).isEqualTo("Preço Foil em EUR");
     }
 
     @Test
@@ -161,5 +177,16 @@ class CardPriceServiceTest {
 
         assertThat(price.price()).isNull();
         assertThat(price.currency()).isEqualTo("USD");
+    }
+
+    @Test
+    void getPriceByNameAndSet_foilWithoutUsdFoil_prefersUsdEtchedOverEuro() throws Exception {
+        when(httpClient.get(anyString())).thenReturn(cardJson("1.23", null, "7.00", "4.00"));
+
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Lightning Bolt", "2x2", true);
+
+        assertThat(price.price()).isEqualByComparingTo("7.00");
+        assertThat(price.currency()).isEqualTo("USD");
+        assertThat(price.note()).isEqualTo("Carta Foil Etched");
     }
 }

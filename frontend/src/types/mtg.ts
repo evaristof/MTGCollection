@@ -163,8 +163,15 @@ export interface CardPrice {
   set: string
   collector_number?: string
   foil: boolean
+  /** USD, ou EUR quando o foil só tem cotação em euro. */
   currency: string
   price: number | null
+  /**
+   * Origem do preço quando não veio de onde se espera — "Carta Foil Etched"
+   * ou "Preço Foil em EUR". É o mesmo texto que vai para o comentário da
+   * carta ao cadastrar/sincronizar.
+   */
+  note?: string | null
 }
 
 /**

@@ -52,10 +52,12 @@ public class CardPriceController {
         body.put("set", set);
         if (number != null) body.put("collector_number", number);
         body.put("foil", foil);
-        // Foil sem usd_foil vem em euro (sem conversão) — por isso a moeda é
-        // parte da resposta, e não uma constante.
+        // Foil sem usd_foil cai em usd_etched ou eur_foil — por isso a moeda é
+        // parte da resposta (e não uma constante) e a origem vai junto em
+        // "note", que é o mesmo texto gravado no comentário da carta.
         body.put("currency", resolved.currency());
         body.put("price", resolved.price());
+        body.put("note", resolved.note());
         return body;
     }
 }
