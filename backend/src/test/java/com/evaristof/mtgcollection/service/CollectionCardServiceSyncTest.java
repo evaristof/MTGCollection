@@ -67,14 +67,14 @@ class CollectionCardServiceSyncTest {
     void syncCard_prefersSetAndNumberWhenBothPresent() {
         CollectionCard existing = row("Treachery", "ulg", "23", true);
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
-        when(cardLookupService.getCardBySetAndNumber("ulg", "23"))
+        when(cardLookupService.getCardBySetAndNumber("ulg", "23", true))
                 .thenReturn(scryfall("Treachery", "ulg", "23", "Enchantment — Aura", "250.00", "400.00"));
 
         CollectionCard updated = service.syncCard(10L);
 
         assertThat(updated.getCardType()).isEqualTo("Enchantment — Aura");
         assertThat(updated.getPrice()).isEqualByComparingTo(new BigDecimal("400.00"));
-        verify(cardLookupService).getCardBySetAndNumber("ulg", "23");
+        verify(cardLookupService).getCardBySetAndNumber("ulg", "23", true);
         verify(repository).save(existing);
     }
 
@@ -82,7 +82,7 @@ class CollectionCardServiceSyncTest {
     void syncCard_fallsBackToNameAndSetWhenNumberMissing() {
         CollectionCard existing = row("Treachery", "ulg", null, false);
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
-        when(cardLookupService.getCardByNameAndSet("Treachery", "ulg"))
+        when(cardLookupService.getCardByNameAndSet("Treachery", "ulg", false))
                 .thenReturn(scryfall("Treachery", "ulg", "23", "Enchantment — Aura", "250.00", "400.00"));
 
         CollectionCard updated = service.syncCard(10L);
@@ -97,7 +97,7 @@ class CollectionCardServiceSyncTest {
     void syncCard_picksFoilPriceWhenRowIsFoil() {
         CollectionCard existing = row("Treachery", "ulg", "23", true);
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
-        when(cardLookupService.getCardBySetAndNumber("ulg", "23"))
+        when(cardLookupService.getCardBySetAndNumber("ulg", "23", true))
                 .thenReturn(scryfall("Treachery", "ulg", "23", "Enchantment — Aura", "250.00", "400.00"));
 
         CollectionCard updated = service.syncCard(10L);
@@ -111,7 +111,7 @@ class CollectionCardServiceSyncTest {
         existing.setCardType("Original Type");
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
         ScryfallCard card = scryfall("X", "set", "1", null, "1.00", null);
-        when(cardLookupService.getCardBySetAndNumber("set", "1")).thenReturn(card);
+        when(cardLookupService.getCardBySetAndNumber("set", "1", false)).thenReturn(card);
 
         CollectionCard updated = service.syncCard(10L);
 
@@ -125,7 +125,7 @@ class CollectionCardServiceSyncTest {
         existing.setPrice(new BigDecimal("9.99"));
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
         ScryfallCard card = scryfall("X", "set", "1", "Instant", null, null);
-        when(cardLookupService.getCardBySetAndNumber("set", "1")).thenReturn(card);
+        when(cardLookupService.getCardBySetAndNumber("set", "1", false)).thenReturn(card);
 
         CollectionCard updated = service.syncCard(10L);
 
@@ -156,7 +156,7 @@ class CollectionCardServiceSyncTest {
     void syncCard_throwsWhenScryfallReturnsNull() {
         CollectionCard existing = row("Ghost", "neo", "1", false);
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
-        when(cardLookupService.getCardBySetAndNumber("neo", "1")).thenReturn(null);
+        when(cardLookupService.getCardBySetAndNumber("neo", "1", false)).thenReturn(null);
 
         assertThatThrownBy(() -> service.syncCard(10L))
                 .isInstanceOf(IllegalStateException.class);
@@ -166,7 +166,7 @@ class CollectionCardServiceSyncTest {
     void syncCard_propagatesScryfallLookupException() {
         CollectionCard existing = row("X", "neo", "1", false);
         when(repository.findById(10L)).thenReturn(Optional.of(existing));
-        when(cardLookupService.getCardBySetAndNumber("neo", "1"))
+        when(cardLookupService.getCardBySetAndNumber("neo", "1", false))
                 .thenThrow(new ScryfallLookupException(
                         "https://api.scryfall.com/cards/neo/1", "HTTP 404", null));
 
@@ -187,7 +187,7 @@ class CollectionCardServiceSyncTest {
         prices.setUsdFoil(null);
         prices.setEurFoil("3.50");
         card.setPrices(prices);
-        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1", true)).thenReturn(card);
 
         CollectionCard synced = service.syncCard(10L);
 
@@ -208,7 +208,7 @@ class CollectionCardServiceSyncTest {
         prices.setUsdFoil("7.25");
         prices.setEurFoil("3.50");
         card.setPrices(prices);
-        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1", true)).thenReturn(card);
 
         CollectionCard synced = service.syncCard(10L);
 
@@ -228,7 +228,7 @@ class CollectionCardServiceSyncTest {
         prices.setUsdEtched("12.00");
         prices.setEurFoil("3.50");
         card.setPrices(prices);
-        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1", true)).thenReturn(card);
 
         CollectionCard synced = service.syncCard(10L);
 
@@ -249,7 +249,7 @@ class CollectionCardServiceSyncTest {
         prices.setUsdEtched("12.00");
         prices.setEurFoil("3.50");
         card.setPrices(prices);
-        when(cardLookupService.getCardBySetAndNumber("cmr", "1")).thenReturn(card);
+        when(cardLookupService.getCardBySetAndNumber("cmr", "1", true)).thenReturn(card);
 
         CollectionCard synced = service.syncCard(10L);
 

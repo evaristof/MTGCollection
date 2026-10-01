@@ -189,4 +189,54 @@ class CardPriceServiceTest {
         assertThat(price.currency()).isEqualTo("USD");
         assertThat(price.note()).isEqualTo("Carta Foil Etched");
     }
+
+    // --- starred parallel-foil print fallback (6th-10th Edition and alike) ---
+
+    private static String numberedCardJson(String set, String number, String usdFoil) {
+        return "{"
+                + "\"object\":\"card\","
+                + "\"name\":\"City of Brass\","
+                + "\"set\":\"" + set + "\","
+                + "\"collector_number\":\"" + number + "\","
+                + "\"prices\":{\"usd\":\"0.50\","
+                + (usdFoil == null ? "\"usd_foil\":null" : "\"usd_foil\":\"" + usdFoil + "\"")
+                + "}}";
+    }
+
+    @Test
+    void getPriceByNameAndSet_foil_fallsBackToStarredPrint_whenPlainPrintHasNoFoilPrice() throws Exception {
+        when(httpClient.get("/cards/named?exact=City+of+Brass&set=7ed"))
+                .thenReturn(numberedCardJson("7ed", "327", null));
+        when(httpClient.get("/cards/7ed/327%E2%98%85"))
+                .thenReturn(numberedCardJson("7ed", "327★", "12.00"));
+
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("City of Brass", "7ed", true);
+
+        assertThat(price.price()).isEqualByComparingTo("12.00");
+        assertThat(price.currency()).isEqualTo("USD");
+    }
+
+    @Test
+    void getPriceBySetAndNumber_foil_fallsBackToStarredPrint_whenPlainPrintHasNoFoilPrice() throws Exception {
+        when(httpClient.get("/cards/7ed/327"))
+                .thenReturn(numberedCardJson("7ed", "327", null));
+        when(httpClient.get("/cards/7ed/327%E2%98%85"))
+                .thenReturn(numberedCardJson("7ed", "327★", "12.00"));
+
+        CardPriceResolver.Resolved price = service.getPriceBySetAndNumber("7ed", "327", true);
+
+        assertThat(price.price()).isEqualByComparingTo("12.00");
+    }
+
+    @Test
+    void getPriceByNameAndSet_foil_staysWithoutPrice_whenNoStarredPrintExists() throws Exception {
+        when(httpClient.get("/cards/named?exact=Sol+Ring&set=lea"))
+                .thenReturn(numberedCardJson("lea", "161", null));
+        when(httpClient.get("/cards/lea/161%E2%98%85"))
+                .thenThrow(new java.io.IOException("Scryfall request failed: 404 for .../lea/161★"));
+
+        CardPriceResolver.Resolved price = service.getPriceByNameAndSet("Sol Ring", "lea", true);
+
+        assertThat(price.hasPrice()).isFalse();
+    }
 }

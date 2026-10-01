@@ -39,6 +39,16 @@ public class CardLookupService {
         return fetch(path);
     }
 
+    /**
+     * Same as {@link #getCardByNameAndSet(String, String)}, but when
+     * {@code foil} is {@code true} and the print that comes back has no foil
+     * price at all, also tries the "starred" parallel-foil print for the same
+     * set (see {@link #preferFoilPrintIfNeeded}).
+     */
+    public ScryfallCard getCardByNameAndSet(String cardName, String setCode, boolean foil) {
+        return preferFoilPrintIfNeeded(getCardByNameAndSet(cardName, setCode), foil);
+    }
+
     /** Builds the Scryfall path (relative to base URL) for a name+set lookup. */
     public String urlByNameAndSet(String cardName, String setCode) {
         return "/cards/named?exact=" + URLEncoder.encode(cardName, StandardCharsets.UTF_8)
@@ -60,6 +70,54 @@ public class CardLookupService {
 
         String path = urlBySetAndNumber(setCode, collectorNumber);
         return fetch(path);
+    }
+
+    /**
+     * Same as {@link #getCardBySetAndNumber(String, String)}, but when
+     * {@code foil} is {@code true} and the print that comes back has no foil
+     * price at all, also tries the "starred" parallel-foil print for the same
+     * set (see {@link #preferFoilPrintIfNeeded}).
+     */
+    public ScryfallCard getCardBySetAndNumber(String setCode, String collectorNumber, boolean foil) {
+        return preferFoilPrintIfNeeded(getCardBySetAndNumber(setCode, collectorNumber), foil);
+    }
+
+    /**
+     * Old core sets (6th–10th Edition and a few others) printed the foil
+     * version of a card as a separate Scryfall print, with its own collector
+     * number suffixed {@value CardPriceResolver#FOIL_STAR_SUFFIX} — e.g. City
+     * of Brass is 7ED #327 (nonfoil) and 7ED #327★ (foil). The "plain" print
+     * that {@link #getCardByNameAndSet(String, String)} /
+     * {@link #getCardBySetAndNumber(String, String)} return for those sets
+     * carries no foil price at all ({@code usd_foil}, {@code usd_etched} and
+     * {@code eur_foil} are all {@code null} on it), even though Scryfall does
+     * have a priced foil print under the starred number.
+     *
+     * <p>So when the caller wants a foil price and the print in hand doesn't
+     * have one, we try that starred number once. Most cards don't have a
+     * parallel-foil print at all — Scryfall then 404s on the starred number,
+     * which we treat as "no such print" and just keep the original card.</p>
+     */
+    private ScryfallCard preferFoilPrintIfNeeded(ScryfallCard card, boolean foil) {
+        if (!foil || card == null) {
+            return card;
+        }
+        if (CardPriceResolver.resolve(card, true).hasPrice()) {
+            return card;
+        }
+        String number = card.getCollectorNumber();
+        String set = card.getSet();
+        if (number == null || number.isBlank() || set == null || set.isBlank()
+                || number.endsWith(CardPriceResolver.FOIL_STAR_SUFFIX)) {
+            return card;
+        }
+        try {
+            ScryfallCard starred = getCardBySetAndNumber(set, number + CardPriceResolver.FOIL_STAR_SUFFIX);
+            return starred != null ? starred : card;
+        } catch (ScryfallLookupException e) {
+            // No parallel-foil print for this card/set — the common case.
+            return card;
+        }
     }
 
     /** Builds the Scryfall path (relative to base URL) for a set+collector-number lookup. */
