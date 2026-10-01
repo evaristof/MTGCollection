@@ -46,7 +46,7 @@ class CollectionCardServiceTest {
 
     @Test
     void addCardToCollection_populatesFieldsFromScryfallAndCaller() {
-        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2"))
+        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2", true))
                 .thenReturn(card("Lightning Bolt", "2x2", "117", "Instant"));
         when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -73,7 +73,7 @@ class CollectionCardServiceTest {
         ScryfallCard partial = new ScryfallCard();
         partial.setCollectorNumber("50");
         partial.setTypeLine("Creature — Elf");
-        when(cardLookupService.getCardByNameAndSet("Llanowar Elves", "m11"))
+        when(cardLookupService.getCardByNameAndSet("Llanowar Elves", "m11", false))
                 .thenReturn(partial);
         when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -95,7 +95,7 @@ class CollectionCardServiceTest {
     @Test
     void addCardToCollection_bySetAndNumber_whenNumberGiven_ignoresName() {
         // With a collector number, resolve by (set, number) — name is optional.
-        when(cardLookupService.getCardBySetAndNumber("uds", "75"))
+        when(cardLookupService.getCardBySetAndNumber("uds", "75", true))
                 .thenReturn(card("Yawgmoth's Bargain", "uds", "75", "Enchantment"));
         when(repository.save(org.mockito.ArgumentMatchers.any(CollectionCard.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
@@ -113,12 +113,13 @@ class CollectionCardServiceTest {
         assertThat(persisted.getLocalizacao()).isEqualTo("Caixa 3");
         // did NOT fall back to the name-based lookup
         verify(cardLookupService, org.mockito.Mockito.never())
-                .getCardByNameAndSet(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                .getCardByNameAndSet(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyBoolean());
     }
 
     @Test
     void addCardToCollection_mergesIntoExistingStack_whenSameIdentity() {
-        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2"))
+        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2", true))
                 .thenReturn(card("Lightning Bolt", "2x2", "117", "Instant"));
         Location caixa1 = location(1L, "Caixa 1");
         CollectionCard existing = new CollectionCard();
@@ -141,7 +142,7 @@ class CollectionCardServiceTest {
 
     @Test
     void addCardToCollection_mergesIntoExistingStack_whenLanguageDiffersOnlyByCase() {
-        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2"))
+        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2", true))
                 .thenReturn(card("Lightning Bolt", "2x2", "117", "Instant"));
         Location caixa1 = location(1L, "Caixa 1");
         CollectionCard existing = new CollectionCard();
@@ -166,7 +167,7 @@ class CollectionCardServiceTest {
     void addCardToCollection_mergesByName_whenStackHasNoCollectorNumber() {
         // Scryfall didn't give a collector number (or the stored row came from
         // an import without one) → the stack is matched by set + name + foil.
-        when(cardLookupService.getCardByNameAndSet("Sol Ring", "cmr"))
+        when(cardLookupService.getCardByNameAndSet("Sol Ring", "cmr", false))
                 .thenReturn(card("Sol Ring", "cmr", null, "Artifact"));
         Location caixa2 = location(2L, "Caixa 2");
         CollectionCard existing = new CollectionCard();
@@ -189,7 +190,7 @@ class CollectionCardServiceTest {
 
     @Test
     void addCardToCollection_doesNotMerge_whenLocationDiffers() {
-        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2"))
+        when(cardLookupService.getCardByNameAndSet("Lightning Bolt", "2x2", true))
                 .thenReturn(card("Lightning Bolt", "2x2", "117", "Instant"));
         CollectionCard other = new CollectionCard();
         other.setSetCode("2x2");
@@ -229,7 +230,7 @@ class CollectionCardServiceTest {
 
     @Test
     void addCardToCollection_throwsWhenScryfallReturnsNull() {
-        when(cardLookupService.getCardByNameAndSet("ghost", "neo")).thenReturn(null);
+        when(cardLookupService.getCardByNameAndSet("ghost", "neo", false)).thenReturn(null);
 
         assertThatThrownBy(() -> service.addCardToCollection("ghost", "neo", false, "en", 1))
                 .isInstanceOf(IllegalStateException.class);

@@ -73,8 +73,8 @@ public class CollectionCardService {
         }
 
         ScryfallCard card = byNumber
-                ? cardLookupService.getCardBySetAndNumber(setCode, collectorNumber.trim())
-                : cardLookupService.getCardByNameAndSet(cardName, setCode);
+                ? cardLookupService.getCardBySetAndNumber(setCode, collectorNumber.trim(), foil)
+                : cardLookupService.getCardByNameAndSet(cardName, setCode, foil);
         if (card == null) {
             throw new IllegalStateException("Scryfall returned no card for "
                     + (byNumber ? "set=" + setCode + " number=" + collectorNumber
@@ -277,9 +277,9 @@ public class CollectionCardService {
 
         ScryfallCard card;
         if (isNotBlank(setCode) && isNotBlank(cardNumber)) {
-            card = cardLookupService.getCardBySetAndNumber(setCode, cardNumber);
+            card = cardLookupService.getCardBySetAndNumber(setCode, cardNumber, existing.isFoil());
         } else if (isNotBlank(setCode) && isNotBlank(cardName)) {
-            card = cardLookupService.getCardByNameAndSet(cardName, setCode);
+            card = cardLookupService.getCardByNameAndSet(cardName, setCode, existing.isFoil());
         } else {
             throw new IllegalStateException(
                     "Linha id=" + id + " sem dados suficientes para sincronizar "

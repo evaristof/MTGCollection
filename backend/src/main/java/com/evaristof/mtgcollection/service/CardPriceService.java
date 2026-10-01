@@ -71,15 +71,60 @@ public class CardPriceService {
     }
 
     private CardPriceResolver.Resolved fetchPrice(String path, boolean foil) {
+        ScryfallCard card = fetchCard(path);
+        CardPriceResolver.Resolved resolved = CardPriceResolver.resolve(card, foil);
+        if (foil && !resolved.hasPrice()) {
+            ScryfallCard starred = fetchStarredFoilFallback(card);
+            if (starred != null) {
+                CardPriceResolver.Resolved starredResolved = CardPriceResolver.resolve(starred, true);
+                if (starredResolved.hasPrice()) {
+                    return starredResolved;
+                }
+            }
+        }
+        return resolved;
+    }
+
+    private ScryfallCard fetchCard(String path) {
         try {
             String body = httpClient.get(path);
-            ScryfallCard card = gson.fromJson(body, ScryfallCard.class);
-            return CardPriceResolver.resolve(card, foil);
+            return gson.fromJson(body, ScryfallCard.class);
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
             throw new IllegalStateException("Failed to fetch card price from Scryfall: " + path, e);
+        }
+    }
+
+    /**
+     * Old core sets (6th–10th Edition and a few others) print the foil
+     * version of a card as a separate Scryfall print, with its own collector
+     * number suffixed {@value CardPriceResolver#FOIL_STAR_SUFFIX} — e.g. City
+     * of Brass is 7ED #327 (nonfoil) and 7ED #327★ (foil). The plain
+     * name/number lookup above returns the nonfoil print for those sets,
+     * which has no foil price at all. So when a foil price was requested and
+     * came back empty, we try the starred collector number once; most cards
+     * don't have a parallel-foil print, so a 404 here just means "no price",
+     * same as before.
+     */
+    private ScryfallCard fetchStarredFoilFallback(ScryfallCard originalCard) {
+        if (originalCard == null) {
+            return null;
+        }
+        String number = originalCard.getCollectorNumber();
+        String set = originalCard.getSet();
+        if (number == null || number.isBlank() || set == null || set.isBlank()
+                || number.endsWith(CardPriceResolver.FOIL_STAR_SUFFIX)) {
+            return null;
+        }
+        String starredPath = "/cards/" + URLEncoder.encode(set, StandardCharsets.UTF_8)
+                + "/" + URLEncoder.encode(number + CardPriceResolver.FOIL_STAR_SUFFIX, StandardCharsets.UTF_8);
+        try {
+            return fetchCard(starredPath);
+        } catch (IllegalStateException e) {
+            // No parallel-foil print for this card/set — the common case.
+            return null;
         }
     }
 }

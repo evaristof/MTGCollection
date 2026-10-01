@@ -35,6 +35,15 @@ public final class CardPriceResolver {
     public static final String USD = "USD";
     public static final String EUR = "EUR";
 
+    /**
+     * Sufixo que a Scryfall usa no {@code collector_number} do print foil
+     * "paralelo" das edições básicas antigas (6ª–10ª Edição e afins): nesses
+     * sets o foil não é a mesma carta com preço foil, é um print à parte,
+     * com número de coletor próprio terminado em "★" — ex.: City of Brass é
+     * 7ED #327 (não-foil) e 7ED #327★ (foil). Ver {@link CardLookupService}.
+     */
+    public static final String FOIL_STAR_SUFFIX = "★";
+
     /** Marcas que este resolver controla — qualquer outra é texto do usuário. */
     private static final List<String> MANAGED_NOTES = List.of(ETCHED_NOTE, EUR_FOIL_NOTE);
 
