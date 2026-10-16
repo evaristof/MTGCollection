@@ -33,7 +33,7 @@ class CollectionCardServiceSyncTest {
     void setUp() {
         cardLookupService = mock(CardLookupService.class);
         repository = mock(CollectionCardRepository.class);
-        service = new CollectionCardService(cardLookupService, repository);
+        service = new CollectionCardService(cardLookupService, repository, mock(CardBatchLookupService.class), 0L);
         when(repository.save(any(CollectionCard.class))).thenAnswer(inv -> inv.getArgument(0));
     }
 

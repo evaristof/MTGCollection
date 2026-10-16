@@ -25,7 +25,7 @@ class CollectionCardServiceUpdateDeleteTest {
     @BeforeEach
     void setUp() {
         repository = mock(CollectionCardRepository.class);
-        service = new CollectionCardService(mock(CardLookupService.class), repository);
+        service = new CollectionCardService(mock(CardLookupService.class), repository, mock(CardBatchLookupService.class), 0L);
     }
 
     private static CollectionCard existing() {

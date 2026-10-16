@@ -19,6 +19,8 @@ function jobLabel(type: string): string {
       return 'Remoção do set'
     case 'purge-blacklist':
       return 'Remoção das imagens dos sets da blacklist'
+    case 'sync-collection-cards':
+      return 'Sincronização de cartas selecionadas (tela de Cartas)'
     default:
       return type
   }

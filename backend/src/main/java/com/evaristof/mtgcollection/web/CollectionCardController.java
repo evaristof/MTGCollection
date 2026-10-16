@@ -3,12 +3,15 @@ package com.evaristof.mtgcollection.web;
 import com.evaristof.mtgcollection.domain.CollectionCard;
 import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.service.CollectionCardService;
+import com.evaristof.mtgcollection.service.DataJob;
+import com.evaristof.mtgcollection.service.DataJobService;
 import com.evaristof.mtgcollection.service.LocationService;
 import com.evaristof.mtgcollection.service.ScryfallLookupException;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 
 import java.math.BigDecimal;
 import org.springframework.http.HttpStatus;
@@ -24,6 +27,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/collection/cards")
@@ -31,10 +35,13 @@ public class CollectionCardController {
 
     private final CollectionCardService service;
     private final LocationService locationService;
+    private final DataJobService dataJobService;
 
-    public CollectionCardController(CollectionCardService service, LocationService locationService) {
+    public CollectionCardController(CollectionCardService service, LocationService locationService,
+                                    DataJobService dataJobService) {
         this.service = service;
         this.locationService = locationService;
+        this.dataJobService = dataJobService;
     }
 
     @PostMapping
@@ -121,6 +128,32 @@ public class CollectionCardController {
                             "message", "Scryfall: " + e.getMessage(),
                             "url", e.getUrl()));
         }
+    }
+
+    /**
+     * Kicks off a background job that refreshes {@code card_type}/{@code price}
+     * for many rows at once via Scryfall's batch endpoint ({@code POST
+     * /cards/collection}), instead of one HTTP round trip per row. Used by
+     * the "Sincronizar selecionados" button on the Cards page.
+     *
+     * <p>Returns {@code 202 Accepted} immediately with a {@code job_id};
+     * the frontend polls {@code GET /api/data-management/jobs/{id}} (same
+     * generic job-progress endpoint the Data Management screen uses) to
+     * show progress and the final per-row errors, if any.</p>
+     */
+    @PostMapping("/sync-batch")
+    public ResponseEntity<?> syncBatch(@Valid @RequestBody SyncBatchRequest req) {
+        DataJob job = dataJobService.submit("sync-collection-cards",
+                j -> service.syncCardsBatch(j, req.ids()));
+        return ResponseEntity.accepted().body(Map.of(
+                "job_id", job.getId().toString(),
+                "message", "Sincronização de " + req.ids().size() + " carta(s) iniciada."));
+    }
+
+    /**
+     * JSON body for {@code POST /api/collection/cards/sync-batch}.
+     */
+    public record SyncBatchRequest(@NotEmpty List<Long> ids) {
     }
 
     /**
