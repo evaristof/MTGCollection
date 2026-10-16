@@ -168,6 +168,15 @@ export const api = {
     request<void>(`/api/collection/cards/${id}`, { method: 'DELETE' }),
   syncCard: (id: number) =>
     request<CollectionCard>(`/api/collection/cards/${id}/sync`, { method: 'POST' }),
+  // Kicks off a background job (POST /cards/collection batch lookup under the
+  // hood) instead of N sequential /sync calls — see CollectionCardService#syncCardsBatch.
+  // Poll progress with the same `dataJob`/`dataActiveJob` helpers used by the
+  // Data Management screen (shared job registry on the backend).
+  syncCardsBatch: (ids: number[]) =>
+    request<{ job_id: string; message: string }>('/api/collection/cards/sync-batch', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
   // Agregados da coleção atual (os históricos ficam nos data dumps)
   collectionValueByLocation: () =>

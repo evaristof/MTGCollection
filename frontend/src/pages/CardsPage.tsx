@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, type AddCardInput } from '../api/client'
-import type { CollectionCard, Location, MagicSet } from '../types/mtg'
+import type { CollectionCard, DataJobSnapshot, Location, MagicSet } from '../types/mtg'
 import { useTableControls } from '../hooks/useTableControls'
 import { SortableTh } from '../components/SortableTh'
 import { PaginationBar } from '../components/PaginationBar'
@@ -100,6 +100,12 @@ export default function CardsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [batchBusy, setBatchBusy] = useState(false)
   const masterCheckboxRef = useRef<HTMLInputElement>(null)
+  // Progresso do job de "Sincronizar selecionados" (POST /sync-batch), via o
+  // mesmo mecanismo de polling de job que a tela de Data Management usa —
+  // ver CollectionCardController#syncBatch / DataJobService.
+  const [syncJob, setSyncJob] = useState<DataJobSnapshot | null>(null)
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const syncHideRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const loadDumps = useCallback(async () => {
     try {
@@ -136,6 +142,54 @@ export default function CardsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadDumps()
   }, [loadDumps])
+
+  const pollSyncJob = useCallback(
+    (jobId: string) => {
+      if (syncPollRef.current) clearInterval(syncPollRef.current)
+      syncPollRef.current = setInterval(async () => {
+        try {
+          const snap = await api.dataJob(jobId)
+          setSyncJob(snap)
+          if (snap.status === 'DONE' || snap.status === 'FAILED' || snap.status === 'CANCELLED') {
+            if (syncPollRef.current) clearInterval(syncPollRef.current)
+            syncPollRef.current = null
+            void loadCards()
+            // Painel fica visível um pouco pra dar tempo de ler o resumo —
+            // mais tempo se houver erros, pra não desaparecer antes de clicar em "Ver erros".
+            const hideAfterMs = snap.errors.length > 0 ? 60_000 : 6_000
+            syncHideRef.current = setTimeout(() => setSyncJob(null), hideAfterMs)
+          }
+        } catch (err) {
+          if (syncPollRef.current) clearInterval(syncPollRef.current)
+          syncPollRef.current = null
+          setError(err instanceof Error ? err.message : String(err))
+        }
+      }, 1000)
+    },
+    [loadCards],
+  )
+
+  useEffect(() => {
+    // Ao montar: retoma o progresso se um job de sincronização em lote ainda
+    // estiver rodando (ex.: usuário trocou de aba e voltou).
+    void (async () => {
+      try {
+        const active = await api.dataActiveJob()
+        if (active && active.type === 'sync-collection-cards'
+            && (active.status === 'PENDING' || active.status === 'RUNNING')) {
+          setSyncJob(active)
+          pollSyncJob(active.id)
+        }
+      } catch {
+        // ignore — sem job ativo
+      }
+    })()
+    return () => {
+      if (syncPollRef.current) clearInterval(syncPollRef.current)
+      if (syncHideRef.current) clearTimeout(syncHideRef.current)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     // load sets for the dropdown — best-effort; not fatal if it fails
@@ -437,28 +491,14 @@ export default function CardsPage() {
   const onBatchSync = async () => {
     if (selectedIds.size === 0) return
     const ids = Array.from(selectedIds)
-    setBatchBusy(true)
     setError(null)
-    const failures: { id: number; err: unknown }[] = []
+    if (syncHideRef.current) clearTimeout(syncHideRef.current)
+    setSyncJob(null)
     try {
-      for (const id of ids) {
-        try {
-          const updated = await api.syncCard(id)
-          setCards((prev) => prev.map((c) => (c.id === id ? updated : c)))
-        } catch (err) {
-          failures.push({ id, err })
-        }
-      }
-      if (failures.length) {
-        alert(
-          `Falha ao sincronizar ${failures.length} carta(s):\n\n` +
-            failures
-              .map((f) => `#${f.id}: ${extractErrorMessage(f.err)}`)
-              .join('\n'),
-        )
-      }
-    } finally {
-      setBatchBusy(false)
+      const { job_id } = await api.syncCardsBatch(ids)
+      pollSyncJob(job_id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -495,6 +535,10 @@ export default function CardsPage() {
   // A dump is read-only history — never let the user mutate rows that
   // reflect a past snapshot.
   const viewingDump = selectedDump !== null
+  const syncJobRunning =
+    syncJob != null && (syncJob.status === 'PENDING' || syncJob.status === 'RUNNING')
+  const syncPct =
+    syncJob && syncJob.total > 0 ? Math.round((syncJob.processed / syncJob.total) * 100) : null
 
   return (
     <section className="page">
@@ -511,23 +555,8 @@ export default function CardsPage() {
           </button>
           <button
             type="button"
-            className="danger"
-            onClick={() => void onBatchDelete()}
-            disabled={selectedIds.size === 0 || batchBusy || viewingDump}
-            title={
-              viewingDump
-                ? 'Snapshots são somente leitura'
-                : selectedIds.size === 0
-                  ? 'Selecione pelo menos uma carta'
-                  : `Deletar ${selectedIds.size} carta(s) selecionada(s)`
-            }
-          >
-            {batchBusy ? 'Processando…' : `Deletar selecionados (${selectedIds.size})`}
-          </button>
-          <button
-            type="button"
             onClick={() => void onBatchSync()}
-            disabled={selectedIds.size === 0 || batchBusy || viewingDump}
+            disabled={selectedIds.size === 0 || syncJobRunning || viewingDump}
             title={
               viewingDump
                 ? 'Snapshots são somente leitura'
@@ -536,7 +565,9 @@ export default function CardsPage() {
                   : `Sincronizar ${selectedIds.size} carta(s) selecionada(s) no Scryfall`
             }
           >
-            {batchBusy ? 'Processando…' : `Sincronizar selecionados (${selectedIds.size})`}
+            {syncJobRunning
+              ? `Sincronizando… ${syncJob!.processed}/${syncJob!.total}`
+              : `Sincronizar selecionados (${selectedIds.size})`}
           </button>
           <button
             type="button"
@@ -598,6 +629,21 @@ export default function CardsPage() {
           >
             Excluir snapshot
           </button>
+          <button
+            type="button"
+            className="danger"
+            onClick={() => void onBatchDelete()}
+            disabled={selectedIds.size === 0 || batchBusy || viewingDump}
+            title={
+              viewingDump
+                ? 'Snapshots são somente leitura'
+                : selectedIds.size === 0
+                  ? 'Selecione pelo menos uma carta'
+                  : `Deletar ${selectedIds.size} carta(s) selecionada(s)`
+            }
+          >
+            {batchBusy ? 'Processando…' : `Deletar selecionados (${selectedIds.size})`}
+          </button>
         </div>
       </div>
 
@@ -608,6 +654,49 @@ export default function CardsPage() {
       />
 
       {error && <p className="error">{error}</p>}
+
+      {syncJob && (
+        <div className="form">
+          <h3>Sincronização de cartas selecionadas — {syncJob.status}</h3>
+          {syncPct != null && (
+            <div
+              style={{
+                background: 'var(--bg-alt, #eee)',
+                borderRadius: 6,
+                overflow: 'hidden',
+                height: 14,
+                margin: '0.5rem 0',
+              }}
+            >
+              <div
+                style={{
+                  width: `${syncPct}%`,
+                  height: '100%',
+                  background: 'var(--accent, #2b6cb0)',
+                  transition: 'width 0.3s',
+                }}
+              />
+            </div>
+          )}
+          <p className="muted">
+            {syncJob.processed}/{syncJob.total} · {syncJob.succeeded} com preço atualizado ·{' '}
+            {syncJob.errors.length} erro(s)
+          </p>
+          {syncJob.message && <p className="muted">{syncJob.message}</p>}
+          {syncJob.errors.length > 0 && (
+            <details>
+              <summary className="muted">Ver erros ({syncJob.errors.length})</summary>
+              <ul>
+                {syncJob.errors.slice(0, 50).map((e, i) => (
+                  <li key={i} className="muted">
+                    {e}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       <form className="form" onSubmit={onAdd}>
         <h3>Adicionar / filtrar cartas</h3>

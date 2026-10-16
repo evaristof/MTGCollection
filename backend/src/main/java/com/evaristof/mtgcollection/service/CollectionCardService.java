@@ -4,12 +4,19 @@ import com.evaristof.mtgcollection.domain.CollectionCard;
 import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.repository.CollectionCardRepository;
 import com.evaristof.mtgcollection.scryfall.dto.ScryfallCard;
+import com.evaristof.mtgcollection.scryfall.dto.ScryfallCardIdentifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -23,13 +30,21 @@ import java.util.Objects;
 @Service
 public class CollectionCardService {
 
+    private static final Logger log = LoggerFactory.getLogger(CollectionCardService.class);
+
     private final CardLookupService cardLookupService;
     private final CollectionCardRepository repository;
+    private final CardBatchLookupService cardBatchLookupService;
+    private final long syncThrottleMs;
 
     public CollectionCardService(CardLookupService cardLookupService,
-                                 CollectionCardRepository repository) {
+                                 CollectionCardRepository repository,
+                                 CardBatchLookupService cardBatchLookupService,
+                                 @Value("${mtg.collection-sync.throttle-ms:100}") long syncThrottleMs) {
         this.cardLookupService = cardLookupService;
         this.repository = repository;
+        this.cardBatchLookupService = cardBatchLookupService;
+        this.syncThrottleMs = Math.max(0L, syncThrottleMs);
     }
 
     @Transactional
@@ -250,6 +265,196 @@ public class CollectionCardService {
         }
         repository.deleteById(id);
         return true;
+    }
+
+    /**
+     * Refreshes many rows at once via Scryfall's batch endpoint
+     * ({@code POST /cards/collection}, up to 75 identifiers per request) —
+     * the same technique {@link CollectionImportService} uses for
+     * spreadsheet imports, applied here to the "Sincronizar selecionados"
+     * button. Where {@link #syncCard(Long)} issues one HTTP round trip per
+     * row, this issues one or two round trips total, no matter how many
+     * rows are selected.
+     *
+     * <p>Mirrors {@code syncCard}'s row semantics exactly: same lookup
+     * precedence (set+number, else set+name), same price resolution via
+     * {@link CardPriceResolver}, and the same starred-foil-print retry that
+     * {@link CardLookupService#getCardBySetAndNumber(String, String, boolean)}
+     * does for old core sets — just batched. A second {@code /cards/collection}
+     * call is issued only for the foil rows whose plain print came back
+     * without a foil price.</p>
+     *
+     * <p>{@code job} is updated as rows are processed so a caller running
+     * this on a background thread (see {@code DataJobService}) can report
+     * progress; this method itself runs synchronously to completion.</p>
+     */
+    @Transactional
+    public void syncCardsBatch(DataJob job, List<Long> ids) {
+        List<CollectionCard> rows = repository.findAllById(ids);
+        job.setTotal(rows.size());
+
+        List<ScryfallCardIdentifier> identifiers = new ArrayList<>(rows.size());
+        for (CollectionCard c : rows) {
+            ScryfallCardIdentifier identifier = identifierFor(c);
+            if (identifier != null) {
+                identifiers.add(identifier);
+            }
+        }
+
+        Map<String, ScryfallCard> index;
+        try {
+            List<ScryfallCardIdentifier> notFound = new ArrayList<>();
+            List<ScryfallCard> matched = cardBatchLookupService.getCardsBatch(identifiers, syncThrottleMs, notFound);
+            index = indexCards(matched);
+            if (!notFound.isEmpty()) {
+                log.info("Scryfall /cards/collection reportou {} identificador(es) não encontrado(s) na sincronização em lote",
+                        notFound.size());
+            }
+        } catch (ScryfallLookupException e) {
+            for (CollectionCard c : rows) {
+                job.addError(rowLabel(c) + ": " + e.getMessage());
+                job.incrementProcessed();
+            }
+            job.setMessage("Falha na consulta em lote ao Scryfall: " + e.getMessage());
+            return;
+        }
+
+        retryStarredFoilPrints(rows, index);
+
+        List<CollectionCard> toSave = new ArrayList<>(rows.size());
+        for (CollectionCard c : rows) {
+            ScryfallCard card = index.get(matchKeyFor(c));
+            if (card == null) {
+                job.addError(rowLabel(c) + ": Scryfall não retornou a carta");
+                job.incrementProcessed();
+                continue;
+            }
+            if (card.getTypeLine() != null) {
+                c.setCardType(card.getTypeLine());
+            }
+            CardPriceResolver.Resolved resolvedPrice = CardPriceResolver.resolve(card, c.isFoil());
+            if (resolvedPrice.price() != null) {
+                c.setPrice(resolvedPrice.price());
+                c.setComentario(CardPriceResolver.applyPriceNote(c.getComentario(), resolvedPrice));
+                job.incrementSucceeded();
+            } else {
+                job.addError(rowLabel(c) + ": sem preço disponível na Scryfall");
+            }
+            if (isBlank(c.getCardNumber()) && card.getCollectorNumber() != null) {
+                c.setCardNumber(card.getCollectorNumber());
+            }
+            toSave.add(c);
+            job.incrementProcessed();
+        }
+        repository.saveAll(toSave);
+        job.setMessage(job.getSucceeded() + " de " + job.getTotal() + " carta(s) sincronizada(s)"
+                + (job.getErrors().isEmpty() ? "." : ", " + job.getErrors().size() + " erro(s)."));
+    }
+
+    /**
+     * Second batch round for rows that want a foil price but whose plain
+     * print has none — the old-core-set "parallel foil print" case (see
+     * {@link CardPriceResolver#FOIL_STAR_SUFFIX}). Updates {@code index} in
+     * place so the main loop in {@link #syncCardsBatch} picks up the
+     * starred print under the row's original (plain) match key.
+     */
+    private void retryStarredFoilPrints(List<CollectionCard> rows, Map<String, ScryfallCard> index) {
+        List<ScryfallCardIdentifier> starIdentifiers = new ArrayList<>();
+        for (CollectionCard c : rows) {
+            if (!c.isFoil()) continue;
+            ScryfallCard card = index.get(matchKeyFor(c));
+            if (card == null || CardPriceResolver.resolve(card, true).hasPrice()) continue;
+            String number = card.getCollectorNumber();
+            String set = card.getSet();
+            if (number == null || number.isBlank() || set == null || set.isBlank()
+                    || number.endsWith(CardPriceResolver.FOIL_STAR_SUFFIX)) {
+                continue;
+            }
+            starIdentifiers.add(ScryfallCardIdentifier.bySetAndNumber(set, number + CardPriceResolver.FOIL_STAR_SUFFIX));
+        }
+        if (starIdentifiers.isEmpty()) {
+            return;
+        }
+        try {
+            List<ScryfallCard> starred = cardBatchLookupService.getCardsBatch(starIdentifiers, syncThrottleMs, null);
+            for (ScryfallCard card : starred) {
+                if (card == null || card.getSet() == null || card.getCollectorNumber() == null) continue;
+                // Index the starred (priced) print under the PLAIN number's key
+                // — rows keep their plain card_number, so that's the key the
+                // main loop will look it up by.
+                String plainNumber = stripStarSuffix(card.getCollectorNumber());
+                index.put(keyBySetAndNumber(card.getSet(), plainNumber), card);
+                if (card.getName() != null) {
+                    index.put(keyByNameAndSet(card.getSet(), card.getName()), card);
+                }
+            }
+        } catch (ScryfallLookupException e) {
+            // Most cards simply have no parallel-foil print — not fatal, the
+            // plain print already indexed stays in use for those rows.
+            log.debug("Starred-foil batch retry failed: {}", e.getMessage());
+        }
+    }
+
+    private static String stripStarSuffix(String collectorNumber) {
+        return collectorNumber.endsWith(CardPriceResolver.FOIL_STAR_SUFFIX)
+                ? collectorNumber.substring(0, collectorNumber.length() - CardPriceResolver.FOIL_STAR_SUFFIX.length())
+                : collectorNumber;
+    }
+
+    private static String rowLabel(CollectionCard c) {
+        return "#" + c.getId() + " (" + (c.getCardName() != null ? c.getCardName() : "?") + ")";
+    }
+
+    /** Same lookup precedence as {@link #syncCard(Long)}: set+number, else set+name. */
+    private static ScryfallCardIdentifier identifierFor(CollectionCard c) {
+        String setCode = c.getSetCode();
+        if (isBlank(setCode)) return null;
+        if (isNotBlank(c.getCardNumber())) {
+            return ScryfallCardIdentifier.bySetAndNumber(setCode, c.getCardNumber());
+        }
+        if (isNotBlank(c.getCardName())) {
+            return ScryfallCardIdentifier.byNameAndSet(c.getCardName(), setCode);
+        }
+        return null;
+    }
+
+    /** The key a row's own (set, number)/(set, name) resolves to in the index below. */
+    private static String matchKeyFor(CollectionCard c) {
+        String setCode = c.getSetCode();
+        if (isBlank(setCode)) return null;
+        if (isNotBlank(c.getCardNumber())) {
+            return keyBySetAndNumber(setCode, c.getCardNumber());
+        }
+        if (isNotBlank(c.getCardName())) {
+            return keyByNameAndSet(setCode, c.getCardName());
+        }
+        return null;
+    }
+
+    private static Map<String, ScryfallCard> indexCards(List<ScryfallCard> cards) {
+        Map<String, ScryfallCard> index = new HashMap<>(cards.size() * 2);
+        for (ScryfallCard card : cards) {
+            if (card == null || card.getSet() == null) continue;
+            if (card.getCollectorNumber() != null) {
+                index.putIfAbsent(keyBySetAndNumber(card.getSet(), card.getCollectorNumber()), card);
+            }
+            if (card.getName() != null) {
+                index.putIfAbsent(keyByNameAndSet(card.getSet(), card.getName()), card);
+            }
+        }
+        return index;
+    }
+
+    private static String keyBySetAndNumber(String setCode, String collectorNumber) {
+        return "n|" + normalize(setCode) + "|" + normalize(collectorNumber);
+    }
+
+    private static String keyByNameAndSet(String setCode, String cardName) {
+        return "c|" + normalize(setCode) + "|" + normalize(cardName);
+    }
+
+    private static String normalize(String s) {
+        return s == null ? "" : s.trim().toLowerCase(Locale.ROOT);
     }
 
     /**

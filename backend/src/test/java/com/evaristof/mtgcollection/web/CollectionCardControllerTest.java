@@ -3,6 +3,8 @@ package com.evaristof.mtgcollection.web;
 import com.evaristof.mtgcollection.domain.CollectionCard;
 import com.evaristof.mtgcollection.domain.Location;
 import com.evaristof.mtgcollection.service.CollectionCardService;
+import com.evaristof.mtgcollection.service.DataJob;
+import com.evaristof.mtgcollection.service.DataJobService;
 import com.evaristof.mtgcollection.service.LocationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -46,6 +48,9 @@ class CollectionCardControllerTest {
 
     @MockBean
     private LocationService locationService;
+
+    @MockBean
+    private DataJobService dataJobService;
 
     private static CollectionCard sampleEntity() {
         CollectionCard c = new CollectionCard();
@@ -214,5 +219,31 @@ class CollectionCardControllerTest {
 
         mockMvc.perform(delete("/api/collection/cards/42"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void syncBatch_submitsAJobAndReturns202WithItsId() throws Exception {
+        DataJob job = new DataJob("sync-collection-cards");
+        when(dataJobService.submit(eq("sync-collection-cards"), any())).thenReturn(job);
+
+        String body = objectMapper.writeValueAsString(Map.of("ids", List.of(1, 2, 3)));
+
+        mockMvc.perform(post("/api/collection/cards/sync-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.job_id", is(job.getId().toString())));
+
+        verify(dataJobService).submit(eq("sync-collection-cards"), any());
+    }
+
+    @Test
+    void syncBatch_returns400WhenIdsIsEmpty() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("ids", List.of()));
+
+        mockMvc.perform(post("/api/collection/cards/sync-batch")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
     }
 }

@@ -26,7 +26,7 @@ class CollectionCardServiceTest {
     void setUp() {
         cardLookupService = mock(CardLookupService.class);
         repository = mock(CollectionCardRepository.class);
-        service = new CollectionCardService(cardLookupService, repository);
+        service = new CollectionCardService(cardLookupService, repository, mock(CardBatchLookupService.class), 0L);
     }
 
     private static Location location(Long id, String name) {
